@@ -65,6 +65,12 @@ struct LanguageDetector {
     /// These are still detected by file extension.
     private static let autoDetectExcluded: Set<String> = ["plain", "zsh", "sql", "css", "markdown"]
 
+    /// Per-language relevance thresholds (default is 7).
+    /// Languages prone to false positives on plain text get a higher bar.
+    private static let relevanceThreshold: [String: Int] = [
+        "swift": 10,
+    ]
+
     /// Languages to pass as subset to highlightAuto (using highlight.js identifiers).
     private static let autoDetectSubset: [String] = {
         allLanguages.compactMap { lang in
@@ -97,7 +103,8 @@ struct LanguageDetector {
         if let auto = Self.hljs.highlightAuto(text, subset: Self.autoDetectSubset) {
             let isProse = Self.looksLikeProse(text)
             let canonical = Self.hljsToCanonical[auto.language] ?? auto.language
-            if auto.relevance >= 7 && !isProse {
+            let threshold = Self.relevanceThreshold[canonical] ?? 7
+            if auto.relevance >= threshold && !isProse {
                 return Result(lang: canonical, confidence: auto.relevance)
             }
         }

@@ -4,6 +4,14 @@ struct SettingsView: View {
     @EnvironmentObject var settings: SettingsStore
     @Environment(\.dismiss) private var dismiss
 
+    private var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+    }
+
+    private var appBuild: String {
+        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -48,6 +56,22 @@ struct SettingsView: View {
                         get: { settings.icloudSync },
                         set: { settings.setICloudSync($0) }
                     ))
+                }
+
+                Section {
+                    Link(destination: URL(string: "https://itsypad.app")!) {
+                        HStack {
+                            Text("itsypad.app")
+                            Spacer()
+                            Image(systemName: "arrow.up.right")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                } footer: {
+                    Text("Itsypad \(appVersion) (\(appBuild))")
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 8)
                 }
             }
             .navigationTitle("Settings")

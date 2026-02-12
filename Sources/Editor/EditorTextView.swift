@@ -41,6 +41,20 @@ final class EditorTextView: UITextView {
         addGestureRecognizer(swipeLeft)
     }
 
+    // MARK: - Clipboard capture
+
+    override func copy(_ sender: Any?) {
+        let selected = (text as NSString).substring(with: selectedRange)
+        super.copy(sender)
+        ClipboardStore.shared.addEntry(text: selected)
+    }
+
+    override func cut(_ sender: Any?) {
+        let selected = (text as NSString).substring(with: selectedRange)
+        super.cut(sender)
+        ClipboardStore.shared.addEntry(text: selected)
+    }
+
     // MARK: - Hardware keyboard commands
 
     override var keyCommands: [UIKeyCommand]? {

@@ -77,7 +77,7 @@ class TabStore: ObservableObject {
     private var saveDebounceWork: DispatchWorkItem?
     private var languageDetectWork: DispatchWorkItem?
     private let sessionURL: URL
-    private let cloudStore: KeyValueStoreProtocol
+    let cloudStore: KeyValueStoreProtocol
     private var icloudObserver: NSObjectProtocol?
     private var settingsObserver: NSObjectProtocol?
     private static let cloudTabsKey = "tabs"
@@ -330,13 +330,16 @@ class TabStore: ObservableObject {
         if synced { lastICloudSync = Date() }
         loadDeletedIDs()
         mergeCloudTabs()
+        ClipboardStore.shared.mergeCloudClipboard(from: cloudStore)
 
         icloudObserver = NotificationCenter.default.addObserver(
             forName: NSUbiquitousKeyValueStore.didChangeExternallyNotification,
             object: cloudStore, queue: .main
         ) { [weak self] _ in
+            guard let self else { return }
             print("[TabStore] iCloud external change notification received")
-            self?.mergeCloudTabs()
+            self.mergeCloudTabs()
+            ClipboardStore.shared.mergeCloudClipboard(from: self.cloudStore)
         }
 
         // Retry merge – iCloud KVS can take time to pull data after login
@@ -346,6 +349,7 @@ class TabStore: ObservableObject {
                 print("[TabStore] iCloud merge retry after \(delay)s")
                 self.cloudStore.synchronize()
                 self.mergeCloudTabs()
+                ClipboardStore.shared.mergeCloudClipboard(from: self.cloudStore)
             }
         }
     }
@@ -366,6 +370,7 @@ class TabStore: ObservableObject {
         cloudStore.synchronize()
         loadDeletedIDs()
         mergeCloudTabs()
+        ClipboardStore.shared.mergeCloudClipboard(from: cloudStore)
     }
 
     private func saveToICloud() {

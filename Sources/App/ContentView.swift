@@ -5,6 +5,7 @@ struct ContentView: View {
     @EnvironmentObject var tabStore: TabStore
     @EnvironmentObject var settings: SettingsStore
     @State private var showTabGrid = false
+    @State private var showClipboard = false
     @State private var showSettings = false
     @State private var showFileImporter = false
     @State private var showFileExporter = false
@@ -27,9 +28,12 @@ struct ContentView: View {
                 }())
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItemGroup(placement: .topBarLeading) {
                     Button { showTabGrid = true } label: {
                         Image(systemName: "square.grid.2x2")
+                    }
+                    Button { showClipboard = true } label: {
+                        Image(systemName: "clipboard")
                     }
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
@@ -87,6 +91,10 @@ struct ContentView: View {
         .sheet(isPresented: $showTabGrid) {
             TabGridView()
                 .environmentObject(tabStore)
+                .environmentObject(settings)
+        }
+        .sheet(isPresented: $showClipboard) {
+            ClipboardView()
                 .environmentObject(settings)
         }
         .sheet(isPresented: $showSettings) {
