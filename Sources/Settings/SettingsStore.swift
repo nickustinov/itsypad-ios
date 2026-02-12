@@ -82,7 +82,7 @@ class SettingsStore: ObservableObject {
         }
     }
 
-    @Published var icloudSync: Bool = false
+    @Published var icloudSync: Bool = true
 
     func setICloudSync(_ enabled: Bool) {
         icloudSync = enabled
@@ -117,6 +117,6 @@ class SettingsStore: ObservableObject {
         numberedListsEnabled = defaults.object(forKey: "numberedListsEnabled") as? Bool ?? true
         checklistsEnabled = defaults.object(forKey: "checklistsEnabled") as? Bool ?? true
         clickableLinks = defaults.object(forKey: "clickableLinks") as? Bool ?? true
-        icloudSync = defaults.bool(forKey: "icloudSync")
+        icloudSync = defaults.object(forKey: "icloudSync") as? Bool ?? true
     }
 }

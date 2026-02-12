@@ -101,12 +101,16 @@ class TabStore: ObservableObject {
         }
 
         restoreSession()
+        print("[TabStore] init: restored \(tabs.count) tabs, selectedTabID=\(selectedTabID?.uuidString ?? "nil")")
 
         if tabs.isEmpty {
             addNewTab()
+            print("[TabStore] init: no tabs after restore, created new tab")
         }
 
-        if SettingsStore.shared.icloudSync {
+        let syncEnabled = SettingsStore.shared.icloudSync
+        print("[TabStore] init: icloudSync=\(syncEnabled)")
+        if syncEnabled {
             startICloudSync()
         }
 
@@ -309,14 +313,19 @@ class TabStore: ObservableObject {
 
     private func syncDeletedIDs() {
         let strings = deletedTabIDs.map(\.uuidString)
+        print("[TabStore] syncDeletedIDs: writing \(strings.count) tombstones")
         cloudStore.setData(try? JSONEncoder().encode(strings), forKey: Self.cloudDeletedKey)
         cloudStore.synchronize()
     }
 
     private func loadDeletedIDs() {
         guard let data = cloudStore.data(forKey: Self.cloudDeletedKey),
-              let strings = try? JSONDecoder().decode([String].self, from: data) else { return }
+              let strings = try? JSONDecoder().decode([String].self, from: data) else {
+            print("[TabStore] loadDeletedIDs: no tombstone data in cloud")
+            return
+        }
         deletedTabIDs = Set(strings.compactMap(UUID.init))
+        print("[TabStore] loadDeletedIDs: loaded \(deletedTabIDs.count) tombstones")
     }
 
     func startICloudSync() {
@@ -359,14 +368,11 @@ class TabStore: ObservableObject {
             NotificationCenter.default.removeObserver(observer)
             icloudObserver = nil
         }
-        cloudStore.removeObject(forKey: Self.cloudTabsKey)
-        cloudStore.removeObject(forKey: Self.cloudDeletedKey)
-        deletedTabIDs.removeAll()
-        cloudStore.synchronize()
     }
 
     func checkICloud() {
         guard SettingsStore.shared.icloudSync else { return }
+        print("[TabStore] checkICloud: triggered")
         cloudStore.synchronize()
         loadDeletedIDs()
         mergeCloudTabs()
@@ -374,19 +380,32 @@ class TabStore: ObservableObject {
     }
 
     private func saveToICloud() {
-        guard SettingsStore.shared.icloudSync else { return }
+        guard SettingsStore.shared.icloudSync else {
+            print("[TabStore] saveToICloud: sync disabled, skipping")
+            return
+        }
         var scratchTabs = tabs.filter { $0.fileURL == nil }
+        print("[TabStore] saveToICloud: \(scratchTabs.count) local scratch tabs")
 
         // Preserve cloud tabs from other devices that haven't been merged yet
         if let data = cloudStore.data(forKey: Self.cloudTabsKey),
            let cloudTabs = try? JSONDecoder().decode([TabData].self, from: data) {
             let localIDs = Set(scratchTabs.map(\.id))
+            var preserved = 0
             for cloudTab in cloudTabs where !localIDs.contains(cloudTab.id) && !deletedTabIDs.contains(cloudTab.id) {
                 scratchTabs.append(cloudTab)
+                preserved += 1
+            }
+            if preserved > 0 {
+                print("[TabStore] saveToICloud: preserved \(preserved) cloud-only tabs")
             }
         }
 
-        guard let data = try? JSONEncoder().encode(scratchTabs) else { return }
+        guard let data = try? JSONEncoder().encode(scratchTabs) else {
+            print("[TabStore] saveToICloud: encoding failed")
+            return
+        }
+        print("[TabStore] saveToICloud: writing \(scratchTabs.count) tabs (\(data.count) bytes)")
         cloudStore.setData(data, forKey: Self.cloudTabsKey)
         cloudStore.synchronize()
         lastICloudSync = Date()
@@ -409,22 +428,37 @@ class TabStore: ObservableObject {
         print("[TabStore] mergeCloudTabs: found \(cloudTabs.count) cloud tabs, \(tabs.count) local tabs")
 
         var result = CloudMergeResult()
+        let localIDs = Set(tabs.map(\.id))
+        print("[TabStore] mergeCloudTabs: local tab IDs = \(localIDs.map(\.uuidString))")
+        print("[TabStore] mergeCloudTabs: tombstoned IDs = \(deletedTabIDs.map(\.uuidString))")
+
         for cloudTab in cloudTabs {
-            if deletedTabIDs.contains(cloudTab.id) { continue }
+            let shortID = cloudTab.id.uuidString.prefix(8)
+            if deletedTabIDs.contains(cloudTab.id) {
+                print("[TabStore] mergeCloudTabs: [\(shortID)] '\(cloudTab.name)' – skipped (tombstoned)")
+                continue
+            }
             if let localIndex = tabs.firstIndex(where: { $0.id == cloudTab.id }) {
-                guard cloudTab.lastModified > tabs[localIndex].lastModified else { continue }
-                if tabs[localIndex].content != cloudTab.content
-                    || tabs[localIndex].name != cloudTab.name
-                    || tabs[localIndex].language != cloudTab.language {
-                    tabs[localIndex].content = cloudTab.content
-                    tabs[localIndex].name = cloudTab.name
-                    tabs[localIndex].language = cloudTab.language
-                    tabs[localIndex].lastModified = cloudTab.lastModified
-                    result.updatedTabIDs.append(cloudTab.id)
+                if cloudTab.lastModified > tabs[localIndex].lastModified {
+                    if tabs[localIndex].content != cloudTab.content
+                        || tabs[localIndex].name != cloudTab.name
+                        || tabs[localIndex].language != cloudTab.language {
+                        tabs[localIndex].content = cloudTab.content
+                        tabs[localIndex].name = cloudTab.name
+                        tabs[localIndex].language = cloudTab.language
+                        tabs[localIndex].lastModified = cloudTab.lastModified
+                        result.updatedTabIDs.append(cloudTab.id)
+                        print("[TabStore] mergeCloudTabs: [\(shortID)] '\(cloudTab.name)' – updated local")
+                    } else {
+                        print("[TabStore] mergeCloudTabs: [\(shortID)] '\(cloudTab.name)' – cloud newer but identical content")
+                    }
+                } else {
+                    print("[TabStore] mergeCloudTabs: [\(shortID)] '\(cloudTab.name)' – skipped (local is newer or equal)")
                 }
             } else {
                 tabs.append(cloudTab)
                 result.newTabIDs.append(cloudTab.id)
+                print("[TabStore] mergeCloudTabs: [\(shortID)] '\(cloudTab.name)' – added new")
             }
         }
 
@@ -432,6 +466,7 @@ class TabStore: ObservableObject {
         let toRemove = tabs.filter { $0.fileURL == nil && deletedTabIDs.contains($0.id) }
         for tab in toRemove {
             result.removedTabIDs.append(tab.id)
+            print("[TabStore] mergeCloudTabs: [\(tab.id.uuidString.prefix(8))] '\(tab.name)' – removed (tombstoned)")
         }
         tabs.removeAll { $0.fileURL == nil && deletedTabIDs.contains($0.id) }
 
@@ -469,6 +504,7 @@ class TabStore: ObservableObject {
             let session = SessionData(tabs: tabs, selectedTabID: selectedTabID)
             let data = try JSONEncoder().encode(session)
             try data.write(to: sessionURL, options: .atomic)
+            print("[TabStore] saveSession: wrote \(tabs.count) tabs (\(data.count) bytes)")
         } catch {
             NSLog("Failed to save session: \(error)")
         }
@@ -478,10 +514,14 @@ class TabStore: ObservableObject {
     private func restoreSession() {
         guard let data = try? Data(contentsOf: sessionURL),
               let session = try? JSONDecoder().decode(SessionData.self, from: data)
-        else { return }
+        else {
+            print("[TabStore] restoreSession: no session file or decode failed at \(sessionURL.path)")
+            return
+        }
 
         tabs = session.tabs
         selectedTabID = session.selectedTabID ?? tabs.first?.id
+        print("[TabStore] restoreSession: loaded \(tabs.count) tabs, selected=\(selectedTabID?.uuidString.prefix(8) ?? "nil")")
 
         for index in tabs.indices where !tabs[index].languageLocked {
             let tab = tabs[index]

@@ -380,7 +380,7 @@ final class TabStoreTests: XCTestCase {
         XCTAssertNil(cloud.storage["tabs"])
     }
 
-    func testStopICloudSyncRemovesCloudData() {
+    func testStopICloudSyncPreservesCloudData() {
         let cloud = MockKeyValueStore()
         cloud.storage["tabs"] = Data()
         let url = FileManager.default.temporaryDirectory
@@ -391,7 +391,7 @@ final class TabStoreTests: XCTestCase {
         let tabStore = TabStore(sessionURL: url, cloudStore: cloud)
         tabStore.stopICloudSync()
 
-        XCTAssertNil(cloud.storage["tabs"])
+        XCTAssertNotNil(cloud.storage["tabs"])
     }
 
     func testMergeCloudTabsAppendsNewTab() {

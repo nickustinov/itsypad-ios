@@ -15,6 +15,13 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section("Sync") {
+                    Toggle("iCloud sync", isOn: Binding(
+                        get: { settings.icloudSync },
+                        set: { settings.setICloudSync($0) }
+                    ))
+                }
+
                 Section("Appearance") {
                     Picker("Mode", selection: $settings.appearanceOverride) {
                         Text("System").tag("system")
@@ -49,13 +56,6 @@ struct SettingsView: View {
 
                 Section("Editor") {
                     Toggle("Clickable links", isOn: $settings.clickableLinks)
-                }
-
-                Section("Sync") {
-                    Toggle("iCloud sync", isOn: Binding(
-                        get: { settings.icloudSync },
-                        set: { settings.setICloudSync($0) }
-                    ))
                 }
 
                 Section {
