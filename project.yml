@@ -24,6 +24,8 @@ targets:
     info:
       path: Sources/Info.plist
       properties:
+        CFBundleDisplayName: Itsypad
+        LSApplicationCategoryType: public.app-category.developer-tools
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
