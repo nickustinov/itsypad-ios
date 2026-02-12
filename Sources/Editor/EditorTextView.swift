@@ -1,0 +1,212 @@
+import UIKit
+
+final class EditorTextView: UITextView {
+    var onTextChange: ((String) -> Void)?
+    var onCursorChange: ((Int) -> Void)?
+
+    private var listsAllowed: Bool {
+        guard let coordinator = delegate as? EditorCoordinator else { return true }
+        let lang = coordinator.language
+        return lang == "plain" || lang == "markdown"
+    }
+
+    override init(frame: CGRect, textContainer: NSTextContainer?) {
+        super.init(frame: frame, textContainer: textContainer)
+        commonInit()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        commonInit()
+    }
+
+    private func commonInit() {
+        autocorrectionType = .no
+        autocapitalizationType = .none
+        smartQuotesType = .no
+        smartDashesType = .no
+        smartInsertDeleteType = .no
+        spellCheckingType = .no
+        keyboardDismissMode = .interactive
+        alwaysBounceVertical = true
+        textContainerInset = UIEdgeInsets(top: 12, left: 8, bottom: 12, right: 8)
+        isFindInteractionEnabled = true
+        print("[EditorTextView] commonInit complete")
+    }
+
+    // MARK: - Hardware keyboard commands
+
+    override var keyCommands: [UIKeyCommand]? {
+        var commands: [UIKeyCommand] = []
+
+        // Cmd+D — duplicate line
+        commands.append(UIKeyCommand(
+            action: #selector(duplicateLine),
+            input: "d",
+            modifierFlags: .command,
+            discoverabilityTitle: "Duplicate line"
+        ))
+
+        // Cmd+Return — toggle checkbox
+        if listsAllowed && SettingsStore.shared.checklistsEnabled {
+            commands.append(UIKeyCommand(
+                action: #selector(toggleCheckboxCommand),
+                input: "\r",
+                modifierFlags: .command,
+                discoverabilityTitle: "Toggle checkbox"
+            ))
+        }
+
+        // Cmd+Shift+L — toggle checklist
+        if listsAllowed && SettingsStore.shared.checklistsEnabled {
+            commands.append(UIKeyCommand(
+                action: #selector(toggleChecklistCommand),
+                input: "l",
+                modifierFlags: [.command, .shift],
+                discoverabilityTitle: "Toggle checklist"
+            ))
+        }
+
+        return commands
+    }
+
+    // MARK: - Checkbox tap detection
+
+    func handleTap(at point: CGPoint) -> Bool {
+        print("[EditorTextView] handleTap at \(point)")
+        // Check link tap
+        if handleLinkTap(at: point) {
+            print("[EditorTextView] link tap handled")
+            return true
+        }
+
+        // Check checkbox tap
+        if listsAllowed, SettingsStore.shared.checklistsEnabled, handleCheckboxTap(at: point) {
+            print("[EditorTextView] checkbox tap handled")
+            return true
+        }
+
+        return false
+    }
+
+    private func handleLinkTap(at point: CGPoint) -> Bool {
+        guard SettingsStore.shared.clickableLinks else { return false }
+        let layoutPoint = CGPoint(
+            x: point.x - textContainerInset.left,
+            y: point.y - textContainerInset.top
+        )
+        let charIndex = layoutManager.characterIndex(
+            for: layoutPoint,
+            in: textContainer,
+            fractionOfDistanceBetweenInsertionPoints: nil
+        )
+        guard charIndex < textStorage.length else { return false }
+
+        guard let urlString = textStorage.attribute(EditorCoordinator.linkURLKey, at: charIndex, effectiveRange: nil) as? String,
+              let url = URL(string: urlString) else { return false }
+
+        UIApplication.shared.open(url)
+        return true
+    }
+
+    private func handleCheckboxTap(at point: CGPoint) -> Bool {
+        let layoutPoint = CGPoint(
+            x: point.x - textContainerInset.left,
+            y: point.y - textContainerInset.top
+        )
+        let charIndex = layoutManager.characterIndex(
+            for: layoutPoint,
+            in: textContainer,
+            fractionOfDistanceBetweenInsertionPoints: nil
+        )
+        let ns = text as NSString
+        guard charIndex < ns.length else { return false }
+
+        let lineRange = ns.lineRange(for: NSRange(location: charIndex, length: 0))
+        let lineText = ns.substring(with: lineRange)
+        let cleanLine = lineText.hasSuffix("\n") ? String(lineText.dropLast()) : lineText
+
+        guard let match = ListHelper.parseLine(cleanLine) else { return false }
+        guard match.kind == .unchecked || match.kind == .checked else { return false }
+
+        let bracketStart = lineRange.location + match.contentStart - 4
+        let bracketEnd = bracketStart + 3
+        guard charIndex >= bracketStart && charIndex < bracketEnd else { return false }
+
+        let toggled = ListHelper.toggleCheckbox(in: cleanLine)
+        let replaceRange = NSRange(location: lineRange.location, length: cleanLine.count)
+        textStorage.replaceCharacters(in: replaceRange, with: toggled)
+        delegate?.textViewDidChange?(self)
+        return true
+    }
+
+    // MARK: - Key command actions
+
+    @objc private func duplicateLine() {
+        let ns = text as NSString
+        let sel = selectedRange
+        let lineRange = ns.lineRange(for: sel)
+        let lineText = ns.substring(with: lineRange)
+
+        let insertAt: Int
+        let insertion: String
+        if lineText.hasSuffix("\n") {
+            insertAt = lineRange.location + lineRange.length
+            insertion = lineText
+        } else {
+            insertAt = lineRange.location + lineRange.length
+            insertion = "\n" + lineText
+        }
+
+        textStorage.replaceCharacters(in: NSRange(location: insertAt, length: 0), with: insertion)
+        selectedRange = NSRange(location: sel.location + insertion.count, length: sel.length)
+        delegate?.textViewDidChange?(self)
+    }
+
+    @objc private func toggleCheckboxCommand() {
+        let ns = text as NSString
+        let sel = selectedRange
+        let lineRange = ns.lineRange(for: NSRange(location: sel.location, length: 0))
+        let lineText = ns.substring(with: lineRange)
+        let cleanLine = lineText.hasSuffix("\n") ? String(lineText.dropLast()) : lineText
+
+        let toggled = ListHelper.toggleCheckbox(in: cleanLine)
+        guard toggled != cleanLine else { return }
+
+        let replaceRange = NSRange(location: lineRange.location, length: cleanLine.count)
+        textStorage.replaceCharacters(in: replaceRange, with: toggled)
+        let safeLoc = min(sel.location, lineRange.location + toggled.count)
+        selectedRange = NSRange(location: safeLoc, length: 0)
+        delegate?.textViewDidChange?(self)
+    }
+
+    @objc private func toggleChecklistCommand() {
+        guard listsAllowed, SettingsStore.shared.checklistsEnabled else { return }
+        let ns = text as NSString
+        let sel = selectedRange
+        let lineRange = ns.lineRange(for: sel)
+
+        var newLines: [String] = []
+        let blockText = ns.substring(with: lineRange)
+        blockText.enumerateLines { line, _ in
+            newLines.append(ListHelper.toggleChecklist(line: line))
+        }
+
+        var newText = newLines.joined(separator: "\n")
+        if blockText.hasSuffix("\n") { newText += "\n" }
+
+        textStorage.replaceCharacters(in: lineRange, with: newText)
+        selectedRange = NSRange(location: lineRange.location, length: newText.count - (blockText.hasSuffix("\n") ? 1 : 0))
+        delegate?.textViewDidChange?(self)
+    }
+
+    // MARK: - Appearance changes
+
+    private var traitRegistration: UITraitChangeRegistration?
+
+    func registerAppearanceTracking() {
+        traitRegistration = registerForTraitChanges([UITraitUserInterfaceStyle.self]) { [weak self] (_: EditorTextView, _) in
+            (self?.delegate as? EditorCoordinator)?.updateTheme()
+        }
+    }
+}
