@@ -491,4 +491,28 @@ final class TabStoreTests: XCTestCase {
         XCTAssertFalse(tab.isDirty)
         XCTAssertEqual(tab.lastModified, .distantPast)
     }
+
+    // MARK: - hasUnsavedChanges
+
+    func testHasUnsavedChangesFileBackedDirty() {
+        var tab = TabData(content: "hello", fileURL: URL(fileURLWithPath: "/tmp/test.swift"), isDirty: true)
+        XCTAssertTrue(tab.hasUnsavedChanges)
+        tab.isDirty = false
+        XCTAssertFalse(tab.hasUnsavedChanges)
+    }
+
+    func testHasUnsavedChangesScratchWithContent() {
+        let tab = TabData(content: "some text")
+        XCTAssertTrue(tab.hasUnsavedChanges)
+    }
+
+    func testHasUnsavedChangesScratchEmpty() {
+        let tab = TabData(content: "")
+        XCTAssertFalse(tab.hasUnsavedChanges)
+    }
+
+    func testHasUnsavedChangesScratchWhitespaceOnly() {
+        let tab = TabData(content: "   \n\t  ")
+        XCTAssertFalse(tab.hasUnsavedChanges)
+    }
 }

@@ -31,6 +31,14 @@ final class EditorTextView: UITextView {
         alwaysBounceVertical = true
         textContainerInset = UIEdgeInsets(top: 12, left: 8, bottom: 12, right: 8)
         isFindInteractionEnabled = true
+
+        let swipeRight = UISwipeGestureRecognizer(target: self, action: #selector(handleSwipeIndent(_:)))
+        swipeRight.direction = .right
+        addGestureRecognizer(swipeRight)
+
+        let swipeLeft = UISwipeGestureRecognizer(target: self, action: #selector(handleSwipeOutdent(_:)))
+        swipeLeft.direction = .left
+        addGestureRecognizer(swipeLeft)
     }
 
     // MARK: - Hardware keyboard commands
@@ -192,6 +200,18 @@ final class EditorTextView: UITextView {
         textStorage.replaceCharacters(in: lineRange, with: newText)
         selectedRange = NSRange(location: lineRange.location, length: newText.count - (blockText.hasSuffix("\n") ? 1 : 0))
         delegate?.textViewDidChange?(self)
+    }
+
+    // MARK: - Swipe indent/outdent
+
+    @objc private func handleSwipeIndent(_ gesture: UISwipeGestureRecognizer) {
+        guard let coordinator = delegate as? EditorCoordinator else { return }
+        coordinator.indentLines(tv: self)
+    }
+
+    @objc private func handleSwipeOutdent(_ gesture: UISwipeGestureRecognizer) {
+        guard let coordinator = delegate as? EditorCoordinator else { return }
+        coordinator.outdentLines(tv: self)
     }
 
     // MARK: - Appearance changes

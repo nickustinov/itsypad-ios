@@ -5,13 +5,24 @@ struct TabCardView: View {
     let isSelected: Bool
     let themeBackground: Color
     let themeForeground: Color
+    var onClose: (() -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(tab.name)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(isSelected ? Color.accentColor : .primary)
-                .lineLimit(1)
+            HStack(spacing: 4) {
+                Text(tab.name)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(isSelected ? Color.accentColor : .primary)
+                    .lineLimit(1)
+
+                if tab.hasUnsavedChanges {
+                    Circle()
+                        .fill(isSelected ? Color.accentColor : .secondary)
+                        .frame(width: 6, height: 6)
+                }
+
+                Spacer(minLength: 20)
+            }
 
             Text(previewText)
                 .font(.system(size: 11, design: .monospaced))
@@ -27,6 +38,19 @@ struct TabCardView: View {
             RoundedRectangle(cornerRadius: 10)
                 .stroke(isSelected ? Color.accentColor : Color.primary.opacity(0.15), lineWidth: isSelected ? 2 : 0.5)
         )
+        .overlay(alignment: .topTrailing) {
+            if let onClose {
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.gray)
+                        .frame(width: 22, height: 22)
+                        .background(.ultraThinMaterial)
+                        .clipShape(Circle())
+                }
+                .padding(6)
+            }
+        }
     }
 
     private var previewText: String {

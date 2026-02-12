@@ -10,7 +10,7 @@ class SettingsStore: ObservableObject {
     private var isLoading = true
     let defaults: UserDefaults
 
-    @Published var editorFontSize: Double = 14 {
+    @Published var editorFontSize: Double = 16 {
         didSet {
             guard !isLoading else { return }
             defaults.set(editorFontSize, forKey: "editorFontSize")
@@ -107,7 +107,7 @@ class SettingsStore: ObservableObject {
 
     private func loadSettings() {
         let savedSize = defaults.double(forKey: "editorFontSize")
-        editorFontSize = savedSize > 0 ? savedSize : 14
+        editorFontSize = savedSize > 0 ? savedSize : 16
         appearanceOverride = defaults.string(forKey: "appearanceOverride") ?? "system"
         syntaxTheme = defaults.string(forKey: "syntaxTheme") ?? "itsypad"
         indentUsingSpaces = defaults.object(forKey: "indentUsingSpaces") as? Bool ?? true

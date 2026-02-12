@@ -62,7 +62,7 @@ struct ContentView: View {
                         .keyboardShortcut("s", modifiers: [.command, .shift])
                         Button {
                             if let id = tabStore.selectedTabID {
-                                if tabStore.selectedTab?.isDirty == true {
+                                if tabStore.selectedTab?.hasUnsavedChanges == true {
                                     pendingCloseTabID = id
                                     showCloseConfirmation = true
                                 } else {

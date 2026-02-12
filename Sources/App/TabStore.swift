@@ -22,6 +22,11 @@ struct TabData: Identifiable, Equatable {
     var languageLocked: Bool
     var isDirty: Bool
     var cursorPosition: Int
+
+    var hasUnsavedChanges: Bool {
+        if fileURL != nil { return isDirty }
+        return !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
     var lastModified: Date
 
     init(
@@ -365,7 +370,17 @@ class TabStore: ObservableObject {
 
     private func saveToICloud() {
         guard SettingsStore.shared.icloudSync else { return }
-        let scratchTabs = tabs.filter { $0.fileURL == nil }
+        var scratchTabs = tabs.filter { $0.fileURL == nil }
+
+        // Preserve cloud tabs from other devices that haven't been merged yet
+        if let data = cloudStore.data(forKey: Self.cloudTabsKey),
+           let cloudTabs = try? JSONDecoder().decode([TabData].self, from: data) {
+            let localIDs = Set(scratchTabs.map(\.id))
+            for cloudTab in cloudTabs where !localIDs.contains(cloudTab.id) && !deletedTabIDs.contains(cloudTab.id) {
+                scratchTabs.append(cloudTab)
+            }
+        }
+
         guard let data = try? JSONEncoder().encode(scratchTabs) else { return }
         cloudStore.setData(data, forKey: Self.cloudTabsKey)
         cloudStore.synchronize()
@@ -377,6 +392,7 @@ class TabStore: ObservableObject {
             print("[TabStore] mergeCloudTabs: iCloud sync disabled, skipping")
             return
         }
+        loadDeletedIDs()
         guard let data = cloudStore.data(forKey: Self.cloudTabsKey) else {
             print("[TabStore] mergeCloudTabs: no cloud data found")
             return

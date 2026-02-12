@@ -7,7 +7,7 @@ class EditorCoordinator: NSObject, UITextViewDelegate {
             if language != oldValue { scheduleHighlightIfNeeded() }
         }
     }
-    var font: UIFont = .monospacedSystemFont(ofSize: 14, weight: .regular)
+    var font: UIFont = .monospacedSystemFont(ofSize: 16, weight: .regular)
 
     private static let highlightJS = HighlightJS.shared
     private static let highlightQueue = DispatchQueue(label: "Itsypad.SyntaxHighlight", qos: .userInitiated)
@@ -419,6 +419,77 @@ class EditorCoordinator: NSObject, UITextViewDelegate {
 
         tv.textStorage.replaceCharacters(in: lineRange, with: newText)
         tv.selectedRange = NSRange(location: lineRange.location, length: newText.count)
+        self.textViewDidChange(tv)
+    }
+
+    func indentLines(tv: EditorTextView) {
+        let indent = SettingsStore.shared.indentString
+        let ns = (tv.text ?? "") as NSString
+        let sel = tv.selectedRange
+        let lineRange = ns.lineRange(for: sel)
+
+        var newText = ""
+        ns.substring(with: lineRange).enumerateLines { line, _ in
+            newText += indent + line + "\n"
+        }
+        if lineRange.location + lineRange.length <= ns.length,
+           !ns.substring(with: lineRange).hasSuffix("\n") {
+            newText = String(newText.dropLast())
+        }
+
+        tv.textStorage.replaceCharacters(in: lineRange, with: newText)
+        if sel.length > 0 {
+            tv.selectedRange = NSRange(location: lineRange.location, length: newText.count)
+        } else {
+            tv.selectedRange = NSRange(location: sel.location + indent.count, length: 0)
+        }
+        self.textViewDidChange(tv)
+    }
+
+    func outdentLines(tv: EditorTextView) {
+        let store = SettingsStore.shared
+        let ns = (tv.text ?? "") as NSString
+        let sel = tv.selectedRange
+        let lineRange = ns.lineRange(for: sel)
+        let blockText = ns.substring(with: lineRange)
+        let endsWithNewline = blockText.hasSuffix("\n")
+
+        var newLines: [String] = []
+        var totalRemoved = 0
+        var firstLineRemoved = 0
+        var isFirstLine = true
+
+        blockText.enumerateLines { line, _ in
+            var stripped = line
+            if store.indentUsingSpaces {
+                var count = 0
+                for ch in line {
+                    if ch == " " && count < store.tabWidth { count += 1 } else { break }
+                }
+                stripped = String(line.dropFirst(count))
+                if isFirstLine { firstLineRemoved = count }
+                totalRemoved += count
+            } else {
+                if line.hasPrefix("\t") {
+                    stripped = String(line.dropFirst())
+                    if isFirstLine { firstLineRemoved = 1 }
+                    totalRemoved += 1
+                }
+            }
+            newLines.append(stripped)
+            isFirstLine = false
+        }
+
+        var newText = newLines.joined(separator: "\n")
+        if endsWithNewline { newText += "\n" }
+
+        tv.textStorage.replaceCharacters(in: lineRange, with: newText)
+        if sel.length > 0 {
+            tv.selectedRange = NSRange(location: lineRange.location, length: newText.count - (endsWithNewline ? 1 : 0))
+        } else {
+            let newLoc = max(lineRange.location, sel.location - firstLineRemoved)
+            tv.selectedRange = NSRange(location: newLoc, length: 0)
+        }
         self.textViewDidChange(tv)
     }
 }

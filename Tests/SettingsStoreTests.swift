@@ -23,7 +23,7 @@ final class SettingsStoreTests: XCTestCase {
     // MARK: - Default values
 
     func testDefaultEditorFontSize() {
-        XCTAssertEqual(store.editorFontSize, 14)
+        XCTAssertEqual(store.editorFontSize, 16)
     }
 
     func testDefaultAppearanceOverride() {
