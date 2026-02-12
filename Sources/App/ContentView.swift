@@ -27,15 +27,15 @@ struct ContentView: View {
                 }())
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItemGroup(placement: .topBarLeading) {
-                    Button { tabStore.addNewTab() } label: {
-                        Image(systemName: "plus")
-                    }
+                ToolbarItem(placement: .topBarLeading) {
                     Button { showTabGrid = true } label: {
                         Image(systemName: "square.grid.2x2")
                     }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button { tabStore.addNewTab() } label: {
+                        Image(systemName: "plus")
+                    }
                     Menu {
                         Button {
                             showFileImporter = true
