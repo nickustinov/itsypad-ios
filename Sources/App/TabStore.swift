@@ -18,7 +18,9 @@ struct TabData: Identifiable, Equatable {
     var name: String
     var content: String
     var language: String
+    var fileURL: URL?
     var languageLocked: Bool
+    var isDirty: Bool
     var cursorPosition: Int
     var lastModified: Date
 
@@ -27,7 +29,9 @@ struct TabData: Identifiable, Equatable {
         name: String = "Untitled",
         content: String = "",
         language: String = "plain",
+        fileURL: URL? = nil,
         languageLocked: Bool = false,
+        isDirty: Bool = false,
         cursorPosition: Int = 0,
         lastModified: Date = Date()
     ) {
@@ -35,41 +39,26 @@ struct TabData: Identifiable, Equatable {
         self.name = name
         self.content = content
         self.language = language
+        self.fileURL = fileURL
         self.languageLocked = languageLocked
+        self.isDirty = isDirty
         self.cursorPosition = cursorPosition
         self.lastModified = lastModified
     }
 }
 
 extension TabData: Codable {
-    private enum CodingKeys: String, CodingKey {
-        case id, name, content, language, languageLocked, cursorPosition, lastModified
-        // Accept macOS fields gracefully
-        case fileURL, isDirty
-    }
-
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
         name = try c.decode(String.self, forKey: .name)
         content = try c.decode(String.self, forKey: .content)
         language = try c.decode(String.self, forKey: .language)
+        fileURL = try c.decodeIfPresent(URL.self, forKey: .fileURL)
         languageLocked = try c.decode(Bool.self, forKey: .languageLocked)
+        isDirty = try c.decodeIfPresent(Bool.self, forKey: .isDirty) ?? false
         cursorPosition = try c.decode(Int.self, forKey: .cursorPosition)
         lastModified = try c.decodeIfPresent(Date.self, forKey: .lastModified) ?? .distantPast
-        // Silently ignore fileURL and isDirty from macOS
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var c = encoder.container(keyedBy: CodingKeys.self)
-        try c.encode(id, forKey: .id)
-        try c.encode(name, forKey: .name)
-        try c.encode(content, forKey: .content)
-        try c.encode(language, forKey: .language)
-        try c.encode(languageLocked, forKey: .languageLocked)
-        try c.encode(false, forKey: .isDirty)
-        try c.encode(cursorPosition, forKey: .cursorPosition)
-        try c.encode(lastModified, forKey: .lastModified)
     }
 }
 
@@ -139,7 +128,8 @@ class TabStore: ObservableObject {
 
     func closeTab(id: UUID) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
-        if SettingsStore.shared.icloudSync {
+        // Record tombstone for scratch tabs so other devices don't re-add
+        if tabs[index].fileURL == nil && SettingsStore.shared.icloudSync {
             deletedTabIDs.insert(id)
             syncDeletedIDs()
         }
@@ -162,30 +152,33 @@ class TabStore: ObservableObject {
 
         var tab = tabs[index]
         tab.content = content
+        tab.isDirty = true
         tab.lastModified = Date()
 
-        // Auto-name from first line
-        let firstLine = content.prefix(while: { $0 != "\n" && $0 != "\r" })
-        let trimmed = firstLine.trimmingCharacters(in: .whitespacesAndNewlines)
-        let newName = trimmed.isEmpty ? "Untitled" : String(trimmed.prefix(30))
-        tab.name = newName
+        // Auto-name from first line when no file
+        if tab.fileURL == nil {
+            let firstLine = content.prefix(while: { $0 != "\n" && $0 != "\r" })
+            let trimmed = firstLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            let newName = trimmed.isEmpty ? "Untitled" : String(trimmed.prefix(30))
+            tab.name = newName
+        }
 
         tabs[index] = tab
 
         if !tab.languageLocked {
-            scheduleLanguageDetection(id: tab.id, content: content, name: tab.name)
+            scheduleLanguageDetection(id: tab.id, content: content, name: tab.name, fileURL: tab.fileURL)
         }
 
         scheduleSave()
     }
 
-    private func scheduleLanguageDetection(id: UUID, content: String, name: String?) {
+    private func scheduleLanguageDetection(id: UUID, content: String, name: String?, fileURL: URL?) {
         languageDetectWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self, let index = self.tabs.firstIndex(where: { $0.id == id }),
                   !self.tabs[index].languageLocked else { return }
-            let result = LanguageDetector.shared.detect(text: content, name: name, fileURL: nil)
-            if result.confidence > 5 {
+            let result = LanguageDetector.shared.detect(text: content, name: name, fileURL: fileURL)
+            if result.confidence > 0 {
                 self.tabs[index].language = result.lang
             } else if self.tabs[index].language != "plain" && result.lang == "plain" {
                 self.tabs[index].language = "plain"
@@ -223,6 +216,80 @@ class TabStore: ObservableObject {
         let insertAt = destinationIndex > sourceIndex ? destinationIndex - 1 : destinationIndex
         tabs.insert(tab, at: insertAt)
         scheduleSave()
+    }
+
+    // MARK: - File operations
+
+    func openFile(url: URL) {
+        // Check if already open
+        if let existing = tabs.firstIndex(where: { $0.fileURL == url }) {
+            selectedTabID = tabs[existing].id
+            return
+        }
+
+        do {
+            let content = try String(contentsOf: url, encoding: .utf8)
+            let name = url.lastPathComponent
+            let lang = LanguageDetector.shared.detectFromExtension(name: name)
+                ?? LanguageDetector.shared.detect(text: content, name: name, fileURL: url).lang
+
+            let tab = TabData(
+                name: name,
+                content: content,
+                language: lang,
+                fileURL: url,
+                languageLocked: true
+            )
+            tabs.append(tab)
+            selectedTabID = tab.id
+            scheduleSave()
+        } catch {
+            NSLog("Failed to open file: \(error)")
+        }
+    }
+
+    func saveFile(id: UUID) {
+        guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+
+        guard let fileURL = tabs[index].fileURL else {
+            // No file URL – caller should trigger save-as picker
+            return
+        }
+
+        do {
+            try tabs[index].content.write(to: fileURL, atomically: true, encoding: .utf8)
+            tabs[index].isDirty = false
+            scheduleSave()
+        } catch {
+            NSLog("Failed to save file: \(error)")
+        }
+    }
+
+    /// Called after the user picks a destination in the file exporter.
+    func completeSaveAs(id: UUID, url: URL) {
+        guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+
+        do {
+            try tabs[index].content.write(to: url, atomically: true, encoding: .utf8)
+            tabs[index].fileURL = url
+            tabs[index].name = url.lastPathComponent
+            tabs[index].isDirty = false
+
+            if let lang = LanguageDetector.shared.detectFromExtension(name: url.lastPathComponent) {
+                tabs[index].language = lang
+                tabs[index].languageLocked = true
+            }
+
+            scheduleSave()
+        } catch {
+            NSLog("Failed to save file: \(error)")
+        }
+    }
+
+    /// Whether the current tab has no fileURL (needs save-as picker instead of direct save).
+    var selectedTabNeedsSaveAs: Bool {
+        guard let tab = selectedTab else { return true }
+        return tab.fileURL == nil
     }
 
     // MARK: - iCloud sync
@@ -298,7 +365,8 @@ class TabStore: ObservableObject {
 
     private func saveToICloud() {
         guard SettingsStore.shared.icloudSync else { return }
-        guard let data = try? JSONEncoder().encode(tabs) else { return }
+        let scratchTabs = tabs.filter { $0.fileURL == nil }
+        guard let data = try? JSONEncoder().encode(scratchTabs) else { return }
         cloudStore.setData(data, forKey: Self.cloudTabsKey)
         cloudStore.synchronize()
         lastICloudSync = Date()
@@ -339,11 +407,12 @@ class TabStore: ObservableObject {
             }
         }
 
-        let toRemove = tabs.filter { deletedTabIDs.contains($0.id) }
+        // Remove local scratch tabs that were tombstoned on another device
+        let toRemove = tabs.filter { $0.fileURL == nil && deletedTabIDs.contains($0.id) }
         for tab in toRemove {
             result.removedTabIDs.append(tab.id)
         }
-        tabs.removeAll { deletedTabIDs.contains($0.id) }
+        tabs.removeAll { $0.fileURL == nil && deletedTabIDs.contains($0.id) }
 
         if tabs.isEmpty {
             addNewTab()
@@ -398,9 +467,9 @@ class TabStore: ObservableObject {
             let result = LanguageDetector.shared.detect(
                 text: tab.content,
                 name: tab.name,
-                fileURL: nil
+                fileURL: tab.fileURL
             )
-            if result.confidence > 5 {
+            if result.confidence > 0 {
                 tabs[index].language = result.lang
             } else if result.lang == "plain" && tab.language != "plain" {
                 tabs[index].language = "plain"

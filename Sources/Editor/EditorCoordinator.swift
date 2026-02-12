@@ -153,9 +153,17 @@ class EditorCoordinator: NSObject, UITextViewDelegate {
                 tv.textStorage.beginEditing()
 
                 if let highlighted {
-                    tv.textStorage.replaceCharacters(in: fullRange, with: highlighted)
-                    let newLength = tv.textStorage.length
-                    tv.textStorage.addAttribute(.font, value: userFont, range: NSRange(location: 0, length: newLength))
+                    // Apply attributes per-range directly from the highlighted
+                    // string, avoiding a full-range reset that flashes gray.
+                    highlighted.enumerateAttributes(
+                        in: NSRange(location: 0, length: highlighted.length),
+                        options: []
+                    ) { attrs, range, _ in
+                        var merged = attrs
+                        if merged[.font] == nil { merged[.font] = userFont }
+                        if merged[.foregroundColor] == nil { merged[.foregroundColor] = currentTheme.foreground }
+                        tv.textStorage.setAttributes(merged, range: range)
+                    }
                 } else {
                     tv.textStorage.setAttributes([
                         .font: userFont,
@@ -271,6 +279,11 @@ class EditorCoordinator: NSObject, UITextViewDelegate {
 
     // MARK: - UITextViewDelegate
 
+    /// Incremented on each local edit, decremented after the async content
+    /// update is delivered to the tab store.  While > 0, `updateUIView`
+    /// must not reset `textView.text` from the (stale) tab-store content.
+    var pendingLocalEdits = 0
+
     func textViewDidChangeSelection(_ textView: UITextView) {
         guard let tv = textView as? EditorTextView else { return }
         tv.onCursorChange?(tv.selectedRange.location)
@@ -279,7 +292,7 @@ class EditorCoordinator: NSObject, UITextViewDelegate {
     func textViewDidChange(_ textView: UITextView) {
         guard let tv = textView as? EditorTextView else { return }
         let text = tv.text ?? ""
-        print("[Editor] textViewDidChange, length=\(text.count)")
+        pendingLocalEdits += 1
         tv.onTextChange?(text)
         scheduleHighlightIfNeeded(text: text)
     }
@@ -287,8 +300,6 @@ class EditorCoordinator: NSObject, UITextViewDelegate {
     func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
         guard let tv = textView as? EditorTextView else { return true }
         let ns = (tv.text ?? "") as NSString
-        let escaped = text.unicodeScalars.map { "\\u{\(String($0.value, radix: 16))}" }.joined()
-        print("[Editor] shouldChangeTextIn range=\(range) replacement=\(escaped) lang=\(language)")
 
         // Newline — list continuation + auto-indent
         if text == "\n" {

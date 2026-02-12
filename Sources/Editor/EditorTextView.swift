@@ -31,7 +31,6 @@ final class EditorTextView: UITextView {
         alwaysBounceVertical = true
         textContainerInset = UIEdgeInsets(top: 12, left: 8, bottom: 12, right: 8)
         isFindInteractionEnabled = true
-        print("[EditorTextView] commonInit complete")
     }
 
     // MARK: - Hardware keyboard commands
@@ -73,16 +72,11 @@ final class EditorTextView: UITextView {
     // MARK: - Checkbox tap detection
 
     func handleTap(at point: CGPoint) -> Bool {
-        print("[EditorTextView] handleTap at \(point)")
-        // Check link tap
         if handleLinkTap(at: point) {
-            print("[EditorTextView] link tap handled")
             return true
         }
 
-        // Check checkbox tap
         if listsAllowed, SettingsStore.shared.checklistsEnabled, handleCheckboxTap(at: point) {
-            print("[EditorTextView] checkbox tap handled")
             return true
         }
 

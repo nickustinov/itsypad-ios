@@ -60,9 +60,10 @@ struct EditorView: UIViewRepresentable {
             }
 
             // Wire text changes to tab store (async to avoid publishing during view updates)
-            textView.onTextChange = { [weak tabStore] content in
+            textView.onTextChange = { [weak tabStore, weak coordinator] content in
                 DispatchQueue.main.async {
                     tabStore?.updateContent(id: tabID, content: content)
+                    coordinator?.pendingLocalEdits -= 1
                 }
             }
             textView.onCursorChange = { [weak tabStore] position in
@@ -99,15 +100,17 @@ struct EditorView: UIViewRepresentable {
             }
         }
 
-        // Update settings
+        // Update settings – only set textView.font when it actually changes
+        // to avoid stripping attributed text on every SwiftUI update cycle
         let font = settings.editorFont
         coordinator.font = font
-        textView.font = font
+        if textView.font != font {
+            textView.font = font
+        }
 
         // Detect theme/appearance changes and re-apply
         if coordinator.appliedAppearance != settings.appearanceOverride
             || coordinator.appliedSyntaxTheme != settings.syntaxTheme {
-            print("[EditorView] theme changed: \(coordinator.appliedAppearance)->\(settings.appearanceOverride), \(coordinator.appliedSyntaxTheme)->\(settings.syntaxTheme)")
             coordinator.updateTheme()
         }
 
@@ -120,8 +123,12 @@ struct EditorView: UIViewRepresentable {
                 coordinator.language = tab.language
             }
 
-            // Handle cloud sync updates — if tab content changed externally
-            if textView.text != tab.content {
+            // Handle cloud sync updates — only reset text from the tab store
+            // when there are no pending local edits.  During typing,
+            // onCursorChange triggers updateUIView before the async
+            // onTextChange has delivered the new content, so tab.content
+            // is stale and resetting would strip all attributes.
+            if textView.text != tab.content && coordinator.pendingLocalEdits == 0 {
                 textView.text = tab.content
                 coordinator.rehighlight()
             }
@@ -141,7 +148,6 @@ struct EditorView: UIViewRepresentable {
         @objc func handleTap(_ gesture: UITapGestureRecognizer) {
             guard let tv = textView else { return }
             let point = gesture.location(in: tv)
-            print("[EditorView.Coordinator] tap gesture state=\(gesture.state.rawValue) point=\(point)")
             if tv.handleTap(at: point) {
                 // Tap was handled (checkbox toggle or link open)
                 return

@@ -112,6 +112,12 @@ final class TabStoreTests: XCTestCase {
         XCTAssertEqual(store.tabs.first?.name.count, 30)
     }
 
+    func testUpdateContentSetsDirty() {
+        let tabID = store.tabs.first!.id
+        store.updateContent(id: tabID, content: "changed")
+        XCTAssertTrue(store.tabs.first!.isDirty)
+    }
+
     func testUpdateContentEmptyLineUsesUntitled() {
         let tabID = store.tabs.first!.id
         store.updateContent(id: tabID, content: "   \nsomething")
@@ -126,13 +132,20 @@ final class TabStoreTests: XCTestCase {
         XCTAssertEqual(store.tabs.first?.language, "python")
     }
 
+    func testUpdateContentWithFileURLDoesNotAutoName() {
+        let tabID = store.tabs.first!.id
+        store.tabs[0].fileURL = URL(fileURLWithPath: "/tmp/test.swift")
+        store.tabs[0].name = "test.swift"
+        store.updateContent(id: tabID, content: "new content")
+        XCTAssertEqual(store.tabs.first?.name, "test.swift")
+    }
+
     func testUpdateContentSameContentNoOp() {
         let tabID = store.tabs.first!.id
         store.updateContent(id: tabID, content: "hello")
-        let modified1 = store.tabs.first!.lastModified
+        store.tabs[0].isDirty = false
         store.updateContent(id: tabID, content: "hello")
-        let modified2 = store.tabs.first!.lastModified
-        XCTAssertEqual(modified1, modified2)
+        XCTAssertFalse(store.tabs.first!.isDirty)
     }
 
     // MARK: - updateLanguage
@@ -183,6 +196,98 @@ final class TabStoreTests: XCTestCase {
         XCTAssertEqual(store.tabs.map(\.id), tabs.map(\.id))
     }
 
+    // MARK: - File operations
+
+    func testOpenFileCreatesTab() throws {
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("swift")
+        try "import Foundation".write(to: fileURL, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        store.openFile(url: fileURL)
+
+        let tab = store.tabs.last!
+        XCTAssertEqual(tab.content, "import Foundation")
+        XCTAssertEqual(tab.fileURL, fileURL)
+        XCTAssertEqual(tab.language, "swift")
+        XCTAssertTrue(tab.languageLocked)
+        XCTAssertEqual(tab.name, fileURL.lastPathComponent)
+        XCTAssertEqual(store.selectedTabID, tab.id)
+    }
+
+    func testOpenFileAlreadyOpenSelectsExisting() throws {
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("py")
+        try "print('hi')".write(to: fileURL, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        store.openFile(url: fileURL)
+        let firstTabID = store.tabs.last!.id
+        let tabCount = store.tabs.count
+
+        store.addNewTab()
+        store.openFile(url: fileURL)
+
+        XCTAssertEqual(store.selectedTabID, firstTabID)
+        XCTAssertEqual(store.tabs.count, tabCount + 1) // +1 for addNewTab, not for second open
+    }
+
+    func testSaveFileWritesToDisk() throws {
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("txt")
+        try "original".write(to: fileURL, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        let tabID = store.tabs.first!.id
+        store.tabs[0].fileURL = fileURL
+        store.tabs[0].content = "updated content"
+        store.tabs[0].isDirty = true
+
+        store.saveFile(id: tabID)
+
+        let saved = try String(contentsOf: fileURL, encoding: .utf8)
+        XCTAssertEqual(saved, "updated content")
+        XCTAssertFalse(store.tabs.first!.isDirty)
+    }
+
+    func testSaveFileWithoutURLNoOp() {
+        let tabID = store.tabs.first!.id
+        store.tabs[0].isDirty = true
+        store.saveFile(id: tabID)
+        XCTAssertTrue(store.tabs.first!.isDirty)
+    }
+
+    func testCompleteSaveAsUpdatesTab() throws {
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("py")
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        let tabID = store.tabs.first!.id
+        store.updateContent(id: tabID, content: "print('hello')")
+
+        store.completeSaveAs(id: tabID, url: fileURL)
+
+        let tab = store.tabs.first!
+        XCTAssertEqual(tab.fileURL, fileURL)
+        XCTAssertEqual(tab.name, fileURL.lastPathComponent)
+        XCTAssertFalse(tab.isDirty)
+        XCTAssertEqual(tab.language, "python")
+        XCTAssertTrue(tab.languageLocked)
+
+        let saved = try String(contentsOf: fileURL, encoding: .utf8)
+        XCTAssertEqual(saved, "print('hello')")
+    }
+
+    func testSelectedTabNeedsSaveAs() {
+        XCTAssertTrue(store.selectedTabNeedsSaveAs)
+        store.tabs[0].fileURL = URL(fileURLWithPath: "/tmp/test.swift")
+        XCTAssertFalse(store.selectedTabNeedsSaveAs)
+    }
+
     // MARK: - Session persistence
 
     func testSessionPersistenceRoundtrip() {
@@ -202,7 +307,9 @@ final class TabStoreTests: XCTestCase {
             name: "Test",
             content: "hello",
             language: "swift",
+            fileURL: URL(fileURLWithPath: "/tmp/test.swift"),
             languageLocked: true,
+            isDirty: true,
             cursorPosition: 42
         )
         let data = try JSONEncoder().encode(tab)
@@ -215,7 +322,9 @@ final class TabStoreTests: XCTestCase {
         XCTAssertEqual(tab.name, "Untitled")
         XCTAssertEqual(tab.content, "")
         XCTAssertEqual(tab.language, "plain")
+        XCTAssertNil(tab.fileURL)
         XCTAssertFalse(tab.languageLocked)
+        XCTAssertFalse(tab.isDirty)
         XCTAssertEqual(tab.cursorPosition, 0)
     }
 
@@ -237,6 +346,23 @@ final class TabStoreTests: XCTestCase {
         let decoded = try! JSONDecoder().decode([TabData].self, from: cloud.storage["tabs"]!)
         XCTAssertEqual(decoded.count, 1)
         XCTAssertEqual(decoded.first?.content, "scratch note")
+        SettingsStore.shared.icloudSync = false
+    }
+
+    func testSaveSessionExcludesFileBackedTabs() {
+        let cloud = MockKeyValueStore()
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("json")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        SettingsStore.shared.icloudSync = true
+        let tabStore = TabStore(sessionURL: url, cloudStore: cloud)
+        tabStore.tabs[0].fileURL = URL(fileURLWithPath: "/tmp/test.swift")
+        tabStore.saveSession()
+
+        let decoded = try! JSONDecoder().decode([TabData].self, from: cloud.storage["tabs"]!)
+        XCTAssertTrue(decoded.isEmpty)
         SettingsStore.shared.icloudSync = false
     }
 
@@ -323,8 +449,7 @@ final class TabStoreTests: XCTestCase {
 
     // MARK: - Cross-platform Codable compatibility
 
-    func testDecodesTabDataWithMacOSFields() throws {
-        // Simulates JSON from macOS TabData which includes fileURL and isDirty
+    func testDecodesTabDataWithFileURL() throws {
         let json = """
         {
             "id": "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",
@@ -333,7 +458,7 @@ final class TabStoreTests: XCTestCase {
             "language": "swift",
             "fileURL": "file:///tmp/test.swift",
             "languageLocked": true,
-            "isDirty": false,
+            "isDirty": true,
             "cursorPosition": 5,
             "lastModified": 0
         }
@@ -343,7 +468,27 @@ final class TabStoreTests: XCTestCase {
         XCTAssertEqual(tab.name, "test.swift")
         XCTAssertEqual(tab.content, "import SwiftUI")
         XCTAssertEqual(tab.language, "swift")
+        XCTAssertEqual(tab.fileURL, URL(string: "file:///tmp/test.swift"))
         XCTAssertTrue(tab.languageLocked)
+        XCTAssertTrue(tab.isDirty)
         XCTAssertEqual(tab.cursorPosition, 5)
+    }
+
+    func testDecodesTabDataWithoutOptionalFields() throws {
+        let json = """
+        {
+            "id": "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",
+            "name": "Untitled",
+            "content": "",
+            "language": "plain",
+            "languageLocked": false,
+            "cursorPosition": 0
+        }
+        """
+        let data = json.data(using: .utf8)!
+        let tab = try JSONDecoder().decode(TabData.self, from: data)
+        XCTAssertNil(tab.fileURL)
+        XCTAssertFalse(tab.isDirty)
+        XCTAssertEqual(tab.lastModified, .distantPast)
     }
 }
