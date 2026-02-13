@@ -254,6 +254,16 @@ struct ContentView: View {
                 Color.clear
             }
         }
+        .background {
+            if #available(iOS 26.0, *) {
+                sidebarThemeBackground
+                    .ignoresSafeArea()
+                    .backgroundExtensionEffect()
+            } else {
+                sidebarThemeBackground
+                    .ignoresSafeArea()
+            }
+        }
         .navigationBarTitleDisplayMode(.inline)
     }
 
