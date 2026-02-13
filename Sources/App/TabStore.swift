@@ -104,8 +104,14 @@ class TabStore: ObservableObject {
         print("[TabStore] init: restored \(tabs.count) tabs, selectedTabID=\(selectedTabID?.uuidString ?? "nil")")
 
         if tabs.isEmpty {
-            addNewTab()
-            print("[TabStore] init: no tabs after restore, created new tab")
+            let isFirstLaunch = !FileManager.default.fileExists(atPath: self.sessionURL.path)
+            if isFirstLaunch {
+                addWelcomeTab()
+                print("[TabStore] init: first launch, created welcome tab")
+            } else {
+                addNewTab()
+                print("[TabStore] init: no tabs after restore, created new tab")
+            }
         }
 
         let syncEnabled = SettingsStore.shared.icloudSync
@@ -130,6 +136,35 @@ class TabStore: ObservableObject {
 
     func addNewTab() {
         let tab = TabData()
+        tabs.append(tab)
+        selectedTabID = tab.id
+        scheduleSave()
+    }
+
+    static let welcomeContent = """
+    # Welcome to Itsypad for iOS
+
+    A tiny, fast scratchpad that lives in your pocket.
+
+    Here's what you can do:
+
+    - [x] Download Itsypad
+    - [ ] Write notes, ideas, code snippets
+    - [ ] Use automatic checklists, bullet and numbered lists
+    - [ ] Try Itsypad for macOS
+    - [ ] Browse clipboard history from Mac
+    - [ ] Sync tabs across devices with iCloud
+    - [ ] Switch between themes in settings
+
+    Happy writing! Close this tab whenever you're ready to start.
+    """
+
+    func addWelcomeTab() {
+        let tab = TabData(
+            name: "Welcome to Itsypad for iOS",
+            content: Self.welcomeContent,
+            language: "markdown"
+        )
         tabs.append(tab)
         selectedTabID = tab.id
         scheduleSave()

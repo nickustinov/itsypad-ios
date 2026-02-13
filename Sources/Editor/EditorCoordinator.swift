@@ -26,6 +26,10 @@ class EditorCoordinator: NSObject, UITextViewDelegate {
     private(set) var appliedSyntaxTheme: String = ""
     private(set) var appliedLineSpacing: Double = 1.0
     private(set) var appliedLetterSpacing: Double = 0.0
+    var appliedWordWrap: Bool = true
+    var appliedShowLineNumbers: Bool = false
+    weak var gutterView: LineNumberGutterView?
+    weak var scrollWrapper: UIScrollView? // EditorScrollWrapper
 
     // Custom attribute key for clickable link URLs
     static let linkURLKey = NSAttributedString.Key("ItsypadLinkURL")
@@ -48,6 +52,36 @@ class EditorCoordinator: NSObject, UITextViewDelegate {
     override init() {
         super.init()
         applyTheme()
+    }
+
+    /// Updates the text view frame and scroll wrapper content size for horizontal scrolling.
+    func updateHorizontalLayout() {
+        guard let tv = textView, let wrapper = scrollWrapper else { return }
+        let wrapperWidth = wrapper.bounds.width
+        guard wrapperWidth > 0 else { return }
+
+        let wrapperHeight = wrapper.bounds.height
+        if tv.wrapsLines {
+            if tv.frame.size != CGSize(width: wrapperWidth, height: wrapperHeight) {
+                tv.frame = CGRect(x: 0, y: 0, width: wrapperWidth, height: wrapperHeight)
+            }
+            wrapper.contentSize = CGSize(width: wrapperWidth, height: wrapperHeight)
+        } else {
+            let contentWidth = max(tv.textContentWidth, wrapperWidth)
+            if tv.frame.size != CGSize(width: contentWidth, height: wrapperHeight) {
+                tv.frame = CGRect(x: 0, y: 0, width: contentWidth, height: wrapperHeight)
+            }
+            wrapper.contentSize = CGSize(width: contentWidth, height: wrapperHeight)
+        }
+    }
+
+    private func scrollWrapperToCaret() {
+        guard let tv = textView, !tv.wrapsLines,
+              let wrapper = scrollWrapper,
+              let pos = tv.selectedTextRange?.start else { return }
+        let caretRect = tv.caretRect(for: pos)
+        let rectInWrapper = tv.convert(caretRect, to: wrapper).insetBy(dx: -20, dy: 0)
+        wrapper.scrollRectToVisible(rectInWrapper, animated: false)
     }
 
     func updateTheme() {
@@ -187,6 +221,7 @@ class EditorCoordinator: NSObject, UITextViewDelegate {
                 self.lastHighlightedText = textSnapshot
                 self.lastLanguage = self.language
                 self.lastAppearance = SettingsStore.shared.appearanceOverride
+                self.gutterView?.setNeedsDisplay()
             }
         }
 
@@ -218,6 +253,7 @@ class EditorCoordinator: NSObject, UITextViewDelegate {
         lastHighlightedText = text
         lastLanguage = language
         lastAppearance = SettingsStore.shared.appearanceOverride
+        gutterView?.setNeedsDisplay()
     }
 
     private func applyListMarkers(tv: EditorTextView, text: String, theme: EditorTheme) {
@@ -267,22 +303,55 @@ class EditorCoordinator: NSObject, UITextViewDelegate {
     private func applySpacing(tv: EditorTextView, text: String, font: UIFont) {
         let store = SettingsStore.shared
         let ns = text as NSString
-        let fullRange = NSRange(location: 0, length: ns.length)
-        guard fullRange.length > 0 else { return }
+        let totalLength = ns.length
+        guard totalLength > 0 else { return }
 
         let kern = store.letterSpacing
         if kern != 0 {
-            tv.textStorage.addAttribute(.kern, value: kern, range: fullRange)
+            tv.textStorage.addAttribute(.kern, value: kern, range: NSRange(location: 0, length: totalLength))
         }
 
         let lineSpacingMultiplier = store.lineSpacing
         let naturalLineHeight = ceil(font.ascender - font.descender + font.leading)
         let extraLineSpacing = (lineSpacingMultiplier - 1.0) * naturalLineHeight
 
-        if extraLineSpacing > 0 {
+        let spaceWidth = (" " as NSString).size(withAttributes: [.font: font]).width
+        let tabPixelWidth = spaceWidth * CGFloat(store.tabWidth)
+        let listsAllowed = language == "plain" || language == "markdown"
+
+        var pos = 0
+        while pos < totalLength {
+            let lineRange = ns.lineRange(for: NSRange(location: pos, length: 0))
+            let lineText = ns.substring(with: lineRange)
+
+            // Calculate leading whitespace width
+            var indent: CGFloat = 0
+            var i = lineRange.location
+            let lineEnd = lineRange.location + lineRange.length
+            while i < lineEnd {
+                let ch = ns.character(at: i)
+                if ch == 0x20 { indent += spaceWidth }
+                else if ch == 0x09 { indent += tabPixelWidth }
+                else { break }
+                i += 1
+            }
+
+            // For list lines, indent wrapped text to content start (past the prefix)
+            var headIndent = indent
+            let cleanLine = lineText.hasSuffix("\n") ? String(lineText.dropLast()) : lineText
+            if listsAllowed,
+               let match = ListHelper.parseLine(cleanLine), ListHelper.isKindEnabled(match.kind) {
+                headIndent = CGFloat(match.contentStart) * spaceWidth
+            }
+
             let para = NSMutableParagraphStyle()
-            para.lineSpacing = extraLineSpacing
-            tv.textStorage.addAttribute(.paragraphStyle, value: para, range: fullRange)
+            para.headIndent = headIndent
+            if extraLineSpacing > 0 {
+                para.lineSpacing = extraLineSpacing
+            }
+            tv.textStorage.addAttribute(.paragraphStyle, value: para, range: lineRange)
+
+            pos = lineRange.location + lineRange.length
         }
 
         appliedLineSpacing = lineSpacingMultiplier
@@ -307,7 +376,7 @@ class EditorCoordinator: NSObject, UITextViewDelegate {
         }
     }
 
-    // MARK: - UITextViewDelegate
+    // MARK: - UITextViewDelegate / UIScrollViewDelegate
 
     /// Incremented on each local edit, decremented after the async content
     /// update is delivered to the tab store.  While > 0, `updateUIView`
@@ -317,6 +386,7 @@ class EditorCoordinator: NSObject, UITextViewDelegate {
     func textViewDidChangeSelection(_ textView: UITextView) {
         guard let tv = textView as? EditorTextView else { return }
         tv.onCursorChange?(tv.selectedRange.location)
+        scrollWrapperToCaret()
     }
 
     func textViewDidChange(_ textView: UITextView) {
@@ -325,6 +395,13 @@ class EditorCoordinator: NSObject, UITextViewDelegate {
         pendingLocalEdits += 1
         tv.onTextChange?(text)
         scheduleHighlightIfNeeded(text: text)
+        updateHorizontalLayout()
+        gutterView?.setNeedsDisplay()
+        scrollWrapperToCaret()
+    }
+
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        gutterView?.setNeedsDisplay()
     }
 
     func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {

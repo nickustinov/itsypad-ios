@@ -1,19 +1,36 @@
 import SwiftUI
 
+private class EditorScrollWrapper: UIScrollView {
+    var onBoundsChange: (() -> Void)?
+    private var lastBoundsSize: CGSize = .zero
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        if bounds.size != lastBoundsSize {
+            lastBoundsSize = bounds.size
+            onBoundsChange?()
+        }
+    }
+}
+
 struct EditorView: UIViewRepresentable {
     let tabID: UUID
     @EnvironmentObject var tabStore: TabStore
     @EnvironmentObject var settings: SettingsStore
 
-    // Shared per-tab text views — preserves undo, cursor, scroll position per tab
+    // Shared per-tab views — preserves undo, cursor, scroll position per tab
     private static var textViews: [UUID: EditorTextView] = [:]
     private static var coordinators: [UUID: EditorCoordinator] = [:]
+    private static var gutterViews: [UUID: LineNumberGutterView] = [:]
+    private static var scrollWrappers: [UUID: EditorScrollWrapper] = [:]
 
     static func cleanupRemovedTabs(activeIDs: Set<UUID>) {
         let staleKeys = Set(textViews.keys).subtracting(activeIDs)
         for key in staleKeys {
             textViews.removeValue(forKey: key)
             coordinators.removeValue(forKey: key)
+            gutterViews.removeValue(forKey: key)
+            scrollWrappers.removeValue(forKey: key)
         }
     }
 
@@ -43,13 +60,37 @@ struct EditorView: UIViewRepresentable {
 
         // Get or create text view for this tab
         let textView: EditorTextView
-        if let existing = Self.textViews[tabID] {
+        let gutterView: LineNumberGutterView
+        let scrollWrapper: EditorScrollWrapper
+        if let existing = Self.textViews[tabID],
+           let existingGutter = Self.gutterViews[tabID],
+           let existingWrapper = Self.scrollWrappers[tabID] {
             textView = existing
+            gutterView = existingGutter
+            scrollWrapper = existingWrapper
         } else {
             textView = EditorTextView()
             textView.delegate = coordinator
             coordinator.textView = textView
             Self.textViews[tabID] = textView
+
+            let gutter = LineNumberGutterView()
+            gutter.textView = textView
+            coordinator.gutterView = gutter
+            Self.gutterViews[tabID] = gutter
+            gutterView = gutter
+
+            let wrapper = EditorScrollWrapper()
+            wrapper.showsHorizontalScrollIndicator = true
+            wrapper.showsVerticalScrollIndicator = false
+            wrapper.alwaysBounceHorizontal = false
+            wrapper.alwaysBounceVertical = false
+            wrapper.onBoundsChange = { [weak coordinator] in
+                coordinator?.updateHorizontalLayout()
+            }
+            coordinator.scrollWrapper = wrapper
+            Self.scrollWrappers[tabID] = wrapper
+            scrollWrapper = wrapper
 
             // Initialize content from tab store
             if let tab = tabStore.tabs.first(where: { $0.id == tabID }) {
@@ -75,23 +116,42 @@ struct EditorView: UIViewRepresentable {
             tapGesture.delegate = context.coordinator
             textView.addGestureRecognizer(tapGesture)
 
+            // Apply initial word wrap setting
+            textView.wrapsLines = settings.wordWrap
+            coordinator.appliedWordWrap = settings.wordWrap
+
             // Register for appearance changes and initial highlight
             textView.registerAppearanceTracking()
             coordinator.rehighlight()
         }
 
-        // Only add the text view if it's not already in this container
-        if textView.superview !== container {
+        // Only add the views if they're not already in this container
+        if scrollWrapper.superview !== container {
             for subview in container.subviews {
                 subview.removeFromSuperview()
             }
-            textView.translatesAutoresizingMaskIntoConstraints = false
-            container.addSubview(textView)
+            gutterView.translatesAutoresizingMaskIntoConstraints = false
+            scrollWrapper.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(gutterView)
+            container.addSubview(scrollWrapper)
+
+            // Text view uses frame-based layout inside the scroll wrapper
+            textView.translatesAutoresizingMaskIntoConstraints = true
+            scrollWrapper.addSubview(textView)
+
+            let gutterWidthConstraint = gutterView.widthAnchor.constraint(equalToConstant: 0)
+            gutterWidthConstraint.identifier = "gutterWidth"
+
             NSLayoutConstraint.activate([
-                textView.topAnchor.constraint(equalTo: container.topAnchor),
-                textView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-                textView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-                textView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+                gutterView.topAnchor.constraint(equalTo: container.topAnchor),
+                gutterView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+                gutterView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+                gutterWidthConstraint,
+
+                scrollWrapper.topAnchor.constraint(equalTo: container.topAnchor),
+                scrollWrapper.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+                scrollWrapper.leadingAnchor.constraint(equalTo: gutterView.trailingAnchor),
+                scrollWrapper.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             ])
 
             // Auto-focus after layout
@@ -120,9 +180,59 @@ struct EditorView: UIViewRepresentable {
             coordinator.rehighlight()
         }
 
+        // Detect word wrap changes
+        var needsLayoutUpdate = false
+        if coordinator.appliedWordWrap != settings.wordWrap {
+            coordinator.appliedWordWrap = settings.wordWrap
+            textView.wrapsLines = settings.wordWrap
+            coordinator.rehighlight()
+            needsLayoutUpdate = true
+        }
+
+        // Detect line numbers changes
+        let showLineNumbers = settings.showLineNumbers
+        if coordinator.appliedShowLineNumbers != showLineNumbers {
+            coordinator.appliedShowLineNumbers = showLineNumbers
+            gutterView.showLineNumbers = showLineNumbers
+            needsLayoutUpdate = true
+        }
+
+        // Update gutter appearance
+        gutterView.lineFont = .monospacedDigitSystemFont(ofSize: CGFloat(settings.editorFontSize) * 0.85, weight: .regular)
+        gutterView.lineColor = coordinator.theme.foreground.withAlphaComponent(0.4)
+        gutterView.bgColor = coordinator.themeBackgroundColor
+
+        // Update gutter width constraint
+        if let gutterWidthConstraint = gutterView.constraints.first(where: { $0.identifier == "gutterWidth" }) {
+            let lineCount = (textView.text as NSString).components(separatedBy: "\n").count
+            let targetWidth: CGFloat = showLineNumbers
+                ? LineNumberGutterView.calculateWidth(lineCount: lineCount, font: gutterView.lineFont)
+                : 0
+            if gutterWidthConstraint.constant != targetWidth {
+                gutterWidthConstraint.constant = targetWidth
+                needsLayoutUpdate = true
+            }
+        }
+        gutterView.setNeedsDisplay()
+
+        // Resolve constraint changes before sizing text view frame
+        if needsLayoutUpdate {
+            container.layoutIfNeeded()
+        }
+        coordinator.updateHorizontalLayout()
+
         container.backgroundColor = coordinator.themeBackgroundColor
         textView.backgroundColor = .clear
         textView.tintColor = coordinator.theme.insertionPointColor
+
+        // Text insets
+        let horizontalInset: CGFloat = showLineNumbers ? 4 : 12
+        if textView.textContainerInset.left != horizontalInset {
+            textView.textContainerInset.left = horizontalInset
+        }
+        if textView.textContainerInset.right != 12 {
+            textView.textContainerInset.right = 12
+        }
 
         // Sync language from tab store
         if let tab = tabStore.tabs.first(where: { $0.id == tabID }) {
@@ -156,10 +266,8 @@ struct EditorView: UIViewRepresentable {
             guard let tv = textView else { return }
             let point = gesture.location(in: tv)
             if tv.handleTap(at: point) {
-                // Tap was handled (checkbox toggle or link open)
                 return
             }
-            // Let the text view handle the tap normally for cursor placement
         }
 
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {

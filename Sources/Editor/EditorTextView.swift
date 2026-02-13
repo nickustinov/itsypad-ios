@@ -4,6 +4,35 @@ final class EditorTextView: UITextView {
     var onTextChange: ((String) -> Void)?
     var onCursorChange: ((Int) -> Void)?
 
+    var wrapsLines: Bool = true {
+        didSet {
+            guard wrapsLines != oldValue else { return }
+            if wrapsLines {
+                textContainer.widthTracksTextView = true
+                if bounds.width > 0 {
+                    textContainer.size.width = bounds.width
+                }
+            } else {
+                textContainer.widthTracksTextView = false
+                textContainer.size.width = CGFloat.greatestFiniteMagnitude
+            }
+            layoutManager.ensureLayout(for: textContainer)
+        }
+    }
+
+    var textContentWidth: CGFloat {
+        let usedWidth = layoutManager.usedRect(for: textContainer).width
+        return ceil(usedWidth) + textContainerInset.left + textContainerInset.right
+    }
+
+    override func layoutSubviews() {
+        if !wrapsLines {
+            textContainer.widthTracksTextView = false
+            textContainer.size.width = CGFloat.greatestFiniteMagnitude
+        }
+        super.layoutSubviews()
+    }
+
     private var listsAllowed: Bool {
         guard let coordinator = delegate as? EditorCoordinator else { return true }
         let lang = coordinator.language

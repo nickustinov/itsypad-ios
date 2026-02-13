@@ -79,6 +79,8 @@ struct SettingsView: View {
                 }
 
                 Section("Editor") {
+                    Toggle("Word wrap", isOn: $settings.wordWrap)
+                    Toggle("Line numbers", isOn: $settings.showLineNumbers)
                     Toggle("Clickable links", isOn: $settings.clickableLinks)
                 }
 

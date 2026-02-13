@@ -146,11 +146,14 @@ struct ContentView: View {
         } detail: {
             editorDetail
                 .toolbar {
-                    ToolbarItemGroup(placement: .bottomBar) {
+                    ToolbarItemGroup(placement: .topBarLeading) {
                         Button { showClipboard = true } label: {
                             Image(systemName: "clipboard")
+                                .scaleEffect(0.9)
+                                .offset(y: -2)
                         }
-                        Spacer()
+                    }
+                    ToolbarItemGroup(placement: .topBarTrailing) {
                         fileMenu
                     }
                 }
@@ -219,14 +222,17 @@ struct ContentView: View {
         NavigationStack {
             editorDetail
                 .toolbar {
-                    ToolbarItemGroup(placement: .bottomBar) {
+                    ToolbarItemGroup(placement: .topBarLeading) {
                         Button { showTabGrid = true } label: {
                             Image(systemName: "square.grid.2x2")
                         }
                         Button { showClipboard = true } label: {
                             Image(systemName: "clipboard")
+                                .scaleEffect(0.9)
+                                .offset(y: -2)
                         }
-                        Spacer()
+                    }
+                    ToolbarItemGroup(placement: .topBarTrailing) {
                         Button { tabStore.addNewTab() } label: {
                             Image(systemName: "plus")
                         }

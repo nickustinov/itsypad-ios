@@ -41,10 +41,24 @@ final class TabStoreTests: XCTestCase {
 
     // MARK: - Init
 
-    func testInitStartsWithOneUntitledTab() {
+    func testFirstLaunchCreatesWelcomeTab() {
         XCTAssertEqual(store.tabs.count, 1)
-        XCTAssertEqual(store.tabs.first?.name, "Untitled")
+        XCTAssertEqual(store.tabs.first?.name, "Welcome to Itsypad for iOS")
+        XCTAssertEqual(store.tabs.first?.language, "markdown")
+        XCTAssertFalse(store.tabs.first!.content.isEmpty)
         XCTAssertNotNil(store.selectedTabID)
+    }
+
+    func testExistingSessionRestoresBlankTab() {
+        // Save an empty session to simulate "not first launch"
+        let session = SessionData(tabs: [], selectedTabID: nil)
+        let data = try! JSONEncoder().encode(session)
+        try! data.write(to: tempURL)
+
+        let restored = TabStore(sessionURL: tempURL, cloudStore: MockKeyValueStore())
+        XCTAssertEqual(restored.tabs.count, 1)
+        XCTAssertEqual(restored.tabs.first?.name, "Untitled")
+        XCTAssertEqual(restored.tabs.first?.language, "plain")
     }
 
     // MARK: - addNewTab
