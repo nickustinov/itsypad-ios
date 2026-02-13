@@ -30,6 +30,7 @@ class EditorCoordinator: NSObject, UITextViewDelegate {
     var appliedShowLineNumbers: Bool = false
     weak var gutterView: LineNumberGutterView?
     weak var scrollWrapper: UIScrollView? // EditorScrollWrapper
+    var gutterWidthConstraint: NSLayoutConstraint?
 
     // Custom attribute key for clickable link URLs
     static let linkURLKey = NSAttributedString.Key("ItsypadLinkURL")

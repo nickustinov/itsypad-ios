@@ -93,8 +93,13 @@ final class LineNumberGutterView: UIView {
                 let y = fragmentRect.origin.y + tv.textContainerInset.top - tv.contentOffset.y
                 let x = gutterWidth - size.width - 8
 
+                // Align to text baseline using the editor font
+                let editorAscender = tv.font?.ascender ?? fragmentRect.height
+                let gutterAscender = self.lineFont.ascender
+                let baselineY = y + editorAscender - gutterAscender
+
                 numberString.draw(
-                    at: CGPoint(x: x, y: y + (fragmentRect.height - size.height) / 2),
+                    at: CGPoint(x: x, y: baselineY),
                     withAttributes: attrs
                 )
                 lineNumber += 1
@@ -121,9 +126,10 @@ final class LineNumberGutterView: UIView {
                 let numberString = "\(lineNumber)" as NSString
                 let size = numberString.size(withAttributes: attrs)
                 let x = gutterWidth - size.width - 8
-                let lineHeight = lineFont.lineHeight
+                let editorAscender = tv.font?.ascender ?? lineFont.ascender
+                let gutterAscender = lineFont.ascender
                 numberString.draw(
-                    at: CGPoint(x: x, y: extraLineY + (lineHeight - size.height) / 2),
+                    at: CGPoint(x: x, y: extraLineY + editorAscender - gutterAscender),
                     withAttributes: attrs
                 )
             }

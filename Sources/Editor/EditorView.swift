@@ -140,7 +140,7 @@ struct EditorView: UIViewRepresentable {
             scrollWrapper.addSubview(textView)
 
             let gutterWidthConstraint = gutterView.widthAnchor.constraint(equalToConstant: 0)
-            gutterWidthConstraint.identifier = "gutterWidth"
+            coordinator.gutterWidthConstraint = gutterWidthConstraint
 
             NSLayoutConstraint.activate([
                 gutterView.topAnchor.constraint(equalTo: container.topAnchor),
@@ -203,7 +203,7 @@ struct EditorView: UIViewRepresentable {
         gutterView.bgColor = coordinator.themeBackgroundColor
 
         // Update gutter width constraint
-        if let gutterWidthConstraint = gutterView.constraints.first(where: { $0.identifier == "gutterWidth" }) {
+        if let gutterWidthConstraint = coordinator.gutterWidthConstraint {
             let lineCount = (textView.text as NSString).components(separatedBy: "\n").count
             let targetWidth: CGFloat = showLineNumbers
                 ? LineNumberGutterView.calculateWidth(lineCount: lineCount, font: gutterView.lineFont)
@@ -226,12 +226,12 @@ struct EditorView: UIViewRepresentable {
         textView.tintColor = coordinator.theme.insertionPointColor
 
         // Text insets
-        let horizontalInset: CGFloat = showLineNumbers ? 4 : 12
+        let horizontalInset: CGFloat = showLineNumbers ? 6 : 20
         if textView.textContainerInset.left != horizontalInset {
             textView.textContainerInset.left = horizontalInset
         }
-        if textView.textContainerInset.right != 12 {
-            textView.textContainerInset.right = 12
+        if textView.textContainerInset.right != 20 {
+            textView.textContainerInset.right = 20
         }
 
         // Sync language from tab store
