@@ -55,7 +55,8 @@ class EditorCoordinator: NSObject, UITextViewDelegate {
         applyTheme()
 
         if let tv = textView {
-            tv.backgroundColor = themeBackgroundColor
+            tv.superview?.backgroundColor = themeBackgroundColor
+            tv.backgroundColor = .clear
             tv.tintColor = theme.insertionPointColor
 
             let storage = tv.textStorage

@@ -120,7 +120,8 @@ struct EditorView: UIViewRepresentable {
             coordinator.rehighlight()
         }
 
-        textView.backgroundColor = coordinator.themeBackgroundColor
+        container.backgroundColor = coordinator.themeBackgroundColor
+        textView.backgroundColor = .clear
         textView.tintColor = coordinator.theme.insertionPointColor
 
         // Sync language from tab store

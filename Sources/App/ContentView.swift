@@ -146,12 +146,11 @@ struct ContentView: View {
         } detail: {
             editorDetail
                 .toolbar {
-                    ToolbarItemGroup(placement: .topBarLeading) {
+                    ToolbarItemGroup(placement: .bottomBar) {
                         Button { showClipboard = true } label: {
                             Image(systemName: "clipboard")
                         }
-                    }
-                    ToolbarItemGroup(placement: .topBarTrailing) {
+                        Spacer()
                         fileMenu
                     }
                 }
@@ -220,15 +219,14 @@ struct ContentView: View {
         NavigationStack {
             editorDetail
                 .toolbar {
-                    ToolbarItemGroup(placement: .topBarLeading) {
+                    ToolbarItemGroup(placement: .bottomBar) {
                         Button { showTabGrid = true } label: {
                             Image(systemName: "square.grid.2x2")
                         }
                         Button { showClipboard = true } label: {
                             Image(systemName: "clipboard")
                         }
-                    }
-                    ToolbarItemGroup(placement: .topBarTrailing) {
+                        Spacer()
                         Button { tabStore.addNewTab() } label: {
                             Image(systemName: "plus")
                         }
@@ -244,15 +242,12 @@ struct ContentView: View {
         Group {
             if let tab = tabStore.selectedTab {
                 EditorView(tabID: tab.id)
+                    .ignoresSafeArea(.container, edges: .vertical)
                     .ignoresSafeArea(.keyboard)
             } else {
                 Color.clear
             }
         }
-        .navigationTitle({
-            let name = tabStore.selectedTab?.name ?? ""
-            return name.isEmpty ? "Untitled" : name
-        }())
         .navigationBarTitleDisplayMode(.inline)
     }
 
