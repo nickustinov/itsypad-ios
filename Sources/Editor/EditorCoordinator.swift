@@ -24,6 +24,8 @@ class EditorCoordinator: NSObject, UITextViewDelegate {
     // Track which settings were last applied so updateUIView can detect changes
     private(set) var appliedAppearance: String = ""
     private(set) var appliedSyntaxTheme: String = ""
+    private(set) var appliedLineSpacing: Double = 1.0
+    private(set) var appliedLetterSpacing: Double = 0.0
 
     // Custom attribute key for clickable link URLs
     static let linkURLKey = NSAttributedString.Key("ItsypadLinkURL")
@@ -171,6 +173,7 @@ class EditorCoordinator: NSObject, UITextViewDelegate {
                     ], range: fullRange)
                 }
 
+                self.applySpacing(tv: tv, text: textSnapshot, font: userFont)
                 self.applyListMarkers(tv: tv, text: textSnapshot, theme: currentTheme)
                 self.applyLinkHighlighting(tv: tv, text: textSnapshot, theme: currentTheme)
 
@@ -201,6 +204,7 @@ class EditorCoordinator: NSObject, UITextViewDelegate {
             .foregroundColor: theme.foreground,
         ], range: fullRange)
 
+        applySpacing(tv: tv, text: text, font: font)
         applyListMarkers(tv: tv, text: text, theme: theme)
         applyLinkHighlighting(tv: tv, text: text, theme: theme)
 
@@ -257,6 +261,31 @@ class EditorCoordinator: NSObject, UITextViewDelegate {
                 }
             }
         }
+    }
+
+    private func applySpacing(tv: EditorTextView, text: String, font: UIFont) {
+        let store = SettingsStore.shared
+        let ns = text as NSString
+        let fullRange = NSRange(location: 0, length: ns.length)
+        guard fullRange.length > 0 else { return }
+
+        let kern = store.letterSpacing
+        if kern != 0 {
+            tv.textStorage.addAttribute(.kern, value: kern, range: fullRange)
+        }
+
+        let lineSpacingMultiplier = store.lineSpacing
+        let naturalLineHeight = ceil(font.ascender - font.descender + font.leading)
+        let extraLineSpacing = (lineSpacingMultiplier - 1.0) * naturalLineHeight
+
+        if extraLineSpacing > 0 {
+            let para = NSMutableParagraphStyle()
+            para.lineSpacing = extraLineSpacing
+            tv.textStorage.addAttribute(.paragraphStyle, value: para, range: fullRange)
+        }
+
+        appliedLineSpacing = lineSpacingMultiplier
+        appliedLetterSpacing = kern
     }
 
     private func applyLinkHighlighting(tv: EditorTextView, text: String, theme: EditorTheme) {

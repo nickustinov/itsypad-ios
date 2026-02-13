@@ -54,6 +54,30 @@ struct SettingsView: View {
                     Toggle("Checklists", isOn: $settings.checklistsEnabled)
                 }
 
+                Section("Spacing") {
+                    HStack {
+                        Text("Line spacing")
+                        Spacer()
+                        Stepper(
+                            String(format: "%.1f", settings.lineSpacing),
+                            value: $settings.lineSpacing,
+                            in: 1.0...2.0,
+                            step: 0.1
+                        )
+                    }
+
+                    HStack {
+                        Text("Letter spacing")
+                        Spacer()
+                        Stepper(
+                            String(format: "%.1f", settings.letterSpacing),
+                            value: $settings.letterSpacing,
+                            in: 0.0...5.0,
+                            step: 0.5
+                        )
+                    }
+                }
+
                 Section("Editor") {
                     Toggle("Clickable links", isOn: $settings.clickableLinks)
                 }

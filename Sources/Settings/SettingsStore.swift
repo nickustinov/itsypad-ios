@@ -82,6 +82,22 @@ class SettingsStore: ObservableObject {
         }
     }
 
+    @Published var lineSpacing: Double = 1.0 {
+        didSet {
+            guard !isLoading else { return }
+            defaults.set(lineSpacing, forKey: "lineSpacing")
+            NotificationCenter.default.post(name: .settingsChanged, object: nil)
+        }
+    }
+
+    @Published var letterSpacing: Double = 0.0 {
+        didSet {
+            guard !isLoading else { return }
+            defaults.set(letterSpacing, forKey: "letterSpacing")
+            NotificationCenter.default.post(name: .settingsChanged, object: nil)
+        }
+    }
+
     @Published var icloudSync: Bool = true
 
     func setICloudSync(_ enabled: Bool) {
@@ -117,6 +133,9 @@ class SettingsStore: ObservableObject {
         numberedListsEnabled = defaults.object(forKey: "numberedListsEnabled") as? Bool ?? true
         checklistsEnabled = defaults.object(forKey: "checklistsEnabled") as? Bool ?? true
         clickableLinks = defaults.object(forKey: "clickableLinks") as? Bool ?? true
+        let savedLineSpacing = defaults.double(forKey: "lineSpacing")
+        lineSpacing = savedLineSpacing > 0 ? savedLineSpacing : 1.0
+        letterSpacing = defaults.double(forKey: "letterSpacing")
         icloudSync = defaults.object(forKey: "icloudSync") as? Bool ?? true
     }
 }

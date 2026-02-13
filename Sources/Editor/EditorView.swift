@@ -114,6 +114,12 @@ struct EditorView: UIViewRepresentable {
             coordinator.updateTheme()
         }
 
+        // Detect spacing changes and re-apply
+        if coordinator.appliedLineSpacing != settings.lineSpacing
+            || coordinator.appliedLetterSpacing != settings.letterSpacing {
+            coordinator.rehighlight()
+        }
+
         textView.backgroundColor = coordinator.themeBackgroundColor
         textView.tintColor = coordinator.theme.insertionPointColor
 
