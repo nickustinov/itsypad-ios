@@ -12,6 +12,7 @@ struct ContentView: View {
     @State private var showFileExporter = false
     @State private var showCloseConfirmation = false
     @State private var pendingCloseTabID: UUID?
+    @State private var fileOpenError: String?
 
     var body: some View {
         Group {
@@ -44,7 +45,11 @@ struct ContentView: View {
                 for url in urls {
                     guard url.startAccessingSecurityScopedResource() else { continue }
                     defer { url.stopAccessingSecurityScopedResource() }
-                    tabStore.openFile(url: url)
+                    do {
+                        try tabStore.openFile(url: url)
+                    } catch {
+                        fileOpenError = error.localizedDescription
+                    }
                 }
             case .failure(let error):
                 NSLog("File import failed: \(error)")
@@ -91,6 +96,16 @@ struct ContentView: View {
             }
         } message: {
             Text("Your changes will be lost if you don't save them.")
+        }
+        .alert("Can't open file", isPresented: Binding(
+            get: { fileOpenError != nil },
+            set: { if !$0 { fileOpenError = nil } }
+        )) {
+            Button("OK") { fileOpenError = nil }
+        } message: {
+            if let fileOpenError {
+                Text(fileOpenError)
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIScene.didEnterBackgroundNotification)) { _ in
             tabStore.saveSession()

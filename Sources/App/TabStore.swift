@@ -234,32 +234,44 @@ class TabStore: ObservableObject {
 
     // MARK: - File operations
 
-    func openFile(url: URL) {
+    enum OpenFileError: LocalizedError {
+        case notTextFile(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .notTextFile(let name):
+                return "\"\(name)\" doesn't appear to be a text file and can't be opened in Itsypad."
+            }
+        }
+    }
+
+    func openFile(url: URL) throws {
         // Check if already open
         if let existing = tabs.firstIndex(where: { $0.fileURL == url }) {
             selectedTabID = tabs[existing].id
             return
         }
 
-        do {
-            let content = try String(contentsOf: url, encoding: .utf8)
-            let name = url.lastPathComponent
-            let lang = LanguageDetector.shared.detectFromExtension(name: name)
-                ?? LanguageDetector.shared.detect(text: content, name: name, fileURL: url).lang
+        let data = try Data(contentsOf: url)
+        let name = url.lastPathComponent
 
-            let tab = TabData(
-                name: name,
-                content: content,
-                language: lang,
-                fileURL: url,
-                languageLocked: true
-            )
-            tabs.append(tab)
-            selectedTabID = tab.id
-            scheduleSave()
-        } catch {
-            NSLog("Failed to open file: \(error)")
+        guard let content = String(data: data, encoding: .utf8) else {
+            throw OpenFileError.notTextFile(name)
         }
+
+        let lang = LanguageDetector.shared.detectFromExtension(name: name)
+            ?? LanguageDetector.shared.detect(text: content, name: name, fileURL: url).lang
+
+        let tab = TabData(
+            name: name,
+            content: content,
+            language: lang,
+            fileURL: url,
+            languageLocked: true
+        )
+        tabs.append(tab)
+        selectedTabID = tab.id
+        scheduleSave()
     }
 
     func saveFile(id: UUID) {
