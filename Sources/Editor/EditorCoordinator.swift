@@ -388,6 +388,11 @@ class EditorCoordinator: NSObject, UITextViewDelegate {
         guard let tv = textView as? EditorTextView else { return }
         tv.onCursorChange?(tv.selectedRange.location)
         scrollWrapperToCaret()
+
+        // Scroll vertically to keep cursor above keyboard
+        if tv.contentInset.bottom > 0 {
+            tv.scrollRangeToVisible(tv.selectedRange)
+        }
     }
 
     func textViewDidChange(_ textView: UITextView) {

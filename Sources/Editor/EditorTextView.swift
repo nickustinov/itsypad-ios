@@ -68,6 +68,38 @@ final class EditorTextView: UITextView {
         let swipeLeft = UISwipeGestureRecognizer(target: self, action: #selector(handleSwipeOutdent(_:)))
         swipeLeft.direction = .left
         addGestureRecognizer(swipeLeft)
+
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(keyboardWillChangeFrame(_:)),
+            name: UIResponder.keyboardWillChangeFrameNotification, object: nil
+        )
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    // MARK: - Keyboard avoidance
+
+    @objc private func keyboardWillChangeFrame(_ notification: Notification) {
+        guard let window = self.window,
+              let endFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
+
+        let viewFrame = convert(bounds, to: window)
+        let overlap = max(viewFrame.maxY - endFrame.minY, 0)
+
+        let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0.25
+        let curveRaw = notification.userInfo?[UIResponder.keyboardAnimationCurveUserInfoKey] as? UInt ?? 7
+        let options = UIView.AnimationOptions(rawValue: curveRaw << 16)
+
+        UIView.animate(withDuration: duration, delay: 0, options: options) {
+            self.contentInset.bottom = overlap
+            self.verticalScrollIndicatorInsets.bottom = overlap
+        } completion: { _ in
+            if overlap > 0 {
+                self.scrollRangeToVisible(self.selectedRange)
+            }
+        }
     }
 
     // MARK: - Clipboard capture
