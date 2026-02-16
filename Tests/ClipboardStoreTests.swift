@@ -4,21 +4,18 @@ import XCTest
 final class ClipboardStoreTests: XCTestCase {
     private var store: ClipboardStore!
     private var tempURL: URL!
-    private var cloud: MockKeyValueStore!
 
     override func setUp() {
         super.setUp()
         tempURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
             .appendingPathExtension("json")
-        cloud = MockKeyValueStore()
-        store = ClipboardStore(persistenceURL: tempURL, cloudStore: cloud)
+        store = ClipboardStore(persistenceURL: tempURL)
     }
 
     override func tearDown() {
         try? FileManager.default.removeItem(at: tempURL)
         store = nil
-        cloud = nil
         super.tearDown()
     }
 
@@ -97,7 +94,7 @@ final class ClipboardStoreTests: XCTestCase {
         store.addEntry(text: "persisted")
         store.save()
 
-        let restored = ClipboardStore(persistenceURL: tempURL, cloudStore: cloud)
+        let restored = ClipboardStore(persistenceURL: tempURL)
         XCTAssertEqual(restored.entries.count, 1)
         XCTAssertEqual(restored.entries.first?.text, "persisted")
     }
@@ -106,52 +103,67 @@ final class ClipboardStoreTests: XCTestCase {
         let missingURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
             .appendingPathExtension("json")
-        let emptyStore = ClipboardStore(persistenceURL: missingURL, cloudStore: cloud)
+        let emptyStore = ClipboardStore(persistenceURL: missingURL)
         XCTAssertTrue(emptyStore.entries.isEmpty)
     }
 
-    // MARK: - Cloud sync
+    // MARK: - Cloud sync (applyCloudClipboardEntry / removeCloudClipboardEntry)
 
-    func testMergeCloudInsertsNewEntries() {
-        let cloudEntry = ClipboardCloudEntry(id: UUID(), text: "from mac", timestamp: Date())
-        let data = try! JSONEncoder().encode([cloudEntry])
-        cloud.storage["clipboard"] = data
-
-        store.mergeCloudClipboard(from: cloud)
+    func testApplyCloudEntryInsertsNew() {
+        let record = CloudClipboardRecord(id: UUID(), text: "from mac", timestamp: Date())
+        store.applyCloudClipboardEntry(record)
 
         XCTAssertEqual(store.entries.count, 1)
         XCTAssertEqual(store.entries.first?.text, "from mac")
-        XCTAssertEqual(store.entries.first?.id, cloudEntry.id)
+        XCTAssertEqual(store.entries.first?.id, record.id)
     }
 
-    func testMergeCloudSkipsDuplicateUUIDs() {
+    func testApplyCloudEntrySkipsDuplicateUUID() {
         let id = UUID()
         store.addEntry(text: "local", id: id, timestamp: Date(timeIntervalSinceNow: -10))
 
-        let cloudEntry = ClipboardCloudEntry(id: id, text: "from mac", timestamp: Date())
-        let data = try! JSONEncoder().encode([cloudEntry])
-        cloud.storage["clipboard"] = data
-
-        store.mergeCloudClipboard(from: cloud)
+        let record = CloudClipboardRecord(id: id, text: "from mac", timestamp: Date())
+        store.applyCloudClipboardEntry(record)
 
         XCTAssertEqual(store.entries.count, 1)
-        // Existing entry kept (no overwrite)
         XCTAssertEqual(store.entries.first?.text, "local")
     }
 
-    func testMergeCloudChronologicalOrder() {
-        let now = Date()
-        let older = ClipboardCloudEntry(id: UUID(), text: "older", timestamp: now.addingTimeInterval(-60))
-        let newer = ClipboardCloudEntry(id: UUID(), text: "newer", timestamp: now)
-        let data = try! JSONEncoder().encode([older, newer])
-        cloud.storage["clipboard"] = data
+    func testApplyCloudEntrySkipsDuplicateText() {
+        store.addEntry(text: "same text")
 
-        store.mergeCloudClipboard(from: cloud)
+        let record = CloudClipboardRecord(id: UUID(), text: "same text", timestamp: Date())
+        store.applyCloudClipboardEntry(record)
+
+        XCTAssertEqual(store.entries.count, 1)
+    }
+
+    func testApplyCloudEntryChronologicalOrder() {
+        let now = Date()
+        let older = CloudClipboardRecord(id: UUID(), text: "older", timestamp: now.addingTimeInterval(-60))
+        let newer = CloudClipboardRecord(id: UUID(), text: "newer", timestamp: now)
+
+        store.applyCloudClipboardEntry(older)
+        store.applyCloudClipboardEntry(newer)
 
         XCTAssertEqual(store.entries.count, 2)
-        // Newest first
         XCTAssertEqual(store.entries.first?.text, "newer")
         XCTAssertEqual(store.entries.last?.text, "older")
+    }
+
+    func testRemoveCloudEntryRemovesExisting() {
+        store.addEntry(text: "to remove")
+        let id = store.entries.first!.id
+
+        store.removeCloudClipboardEntry(id: id)
+
+        XCTAssertTrue(store.entries.isEmpty)
+    }
+
+    func testRemoveCloudEntryNoOpForUnknownID() {
+        store.addEntry(text: "keep")
+        store.removeCloudClipboardEntry(id: UUID())
+        XCTAssertEqual(store.entries.count, 1)
     }
 
     // MARK: - Deduplication
@@ -185,97 +197,5 @@ final class ClipboardStoreTests: XCTestCase {
             store.addEntry(text: "entry \(i)")
         }
         XCTAssertLessThanOrEqual(store.entries.count, 1000)
-    }
-
-    // MARK: - Tombstones
-
-    func testDeleteEntrySyncsTombstone() {
-        SettingsStore.shared.icloudSync = true
-        defer { SettingsStore.shared.icloudSync = false }
-
-        store.addEntry(text: "to delete")
-        let id = store.entries.first!.id
-        store.deleteEntry(id: id)
-
-        let data = cloud.storage["deletedClipboardIDs"]!
-        let ids = try! JSONDecoder().decode([String].self, from: data)
-        XCTAssertTrue(ids.contains(id.uuidString))
-    }
-
-    func testClearAllSyncsTombstones() {
-        SettingsStore.shared.icloudSync = true
-        defer { SettingsStore.shared.icloudSync = false }
-
-        store.addEntry(text: "one")
-        store.addEntry(text: "two")
-        let localIDs = Set(store.entries.map(\.id.uuidString))
-
-        // Also put a cloud-only entry
-        let cloudOnly = ClipboardCloudEntry(id: UUID(), text: "cloud only", timestamp: Date())
-        let cloudData = try! JSONEncoder().encode([cloudOnly])
-        cloud.storage["clipboard"] = cloudData
-
-        store.clearAll()
-
-        let data = cloud.storage["deletedClipboardIDs"]!
-        let tombstoned = Set(try! JSONDecoder().decode([String].self, from: data))
-        // Local IDs tombstoned
-        XCTAssertTrue(localIDs.isSubset(of: tombstoned))
-        // Cloud-only ID tombstoned
-        XCTAssertTrue(tombstoned.contains(cloudOnly.id.uuidString))
-    }
-
-    func testMergeSkipsTombstonedCloudEntries() {
-        let tombstonedID = UUID()
-        let normalID = UUID()
-
-        // Write tombstone to cloud
-        let tombstoneData = try! JSONEncoder().encode([tombstonedID.uuidString])
-        cloud.storage["deletedClipboardIDs"] = tombstoneData
-
-        // Write cloud entries including the tombstoned one
-        let cloudEntries = [
-            ClipboardCloudEntry(id: tombstonedID, text: "deleted", timestamp: Date()),
-            ClipboardCloudEntry(id: normalID, text: "kept", timestamp: Date()),
-        ]
-        cloud.storage["clipboard"] = try! JSONEncoder().encode(cloudEntries)
-
-        store.mergeCloudClipboard(from: cloud)
-
-        XCTAssertEqual(store.entries.count, 1)
-        XCTAssertEqual(store.entries.first?.id, normalID)
-        XCTAssertEqual(store.entries.first?.text, "kept")
-    }
-
-    func testMergeRemovesTombstonedLocalEntries() {
-        let id = UUID()
-        store.addEntry(text: "will be removed", id: id, timestamp: Date())
-        XCTAssertEqual(store.entries.count, 1)
-
-        // Write tombstone to cloud for the local entry
-        let tombstoneData = try! JSONEncoder().encode([id.uuidString])
-        cloud.storage["deletedClipboardIDs"] = tombstoneData
-
-        store.mergeCloudClipboard(from: cloud)
-
-        XCTAssertTrue(store.entries.isEmpty)
-    }
-
-    func testMergeTriggersUIUpdate() {
-        let id1 = UUID()
-        let id2 = UUID()
-        store.addEntry(text: "entry 1", id: id1, timestamp: Date())
-        store.addEntry(text: "entry 2", id: id2, timestamp: Date())
-        XCTAssertEqual(store.entries.count, 2)
-
-        // Tombstone one entry via cloud
-        let tombstoneData = try! JSONEncoder().encode([id1.uuidString])
-        cloud.storage["deletedClipboardIDs"] = tombstoneData
-
-        store.mergeCloudClipboard(from: cloud)
-
-        // entries count changed – @Published triggers UI update
-        XCTAssertEqual(store.entries.count, 1)
-        XCTAssertEqual(store.entries.first?.id, id2)
     }
 }

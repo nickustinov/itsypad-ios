@@ -96,7 +96,8 @@ struct ContentView: View {
             tabStore.saveSession()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
-            tabStore.checkICloud()
+            print("[ContentView] willEnterForeground – triggering fetchChanges")
+            CloudSyncEngine.shared.fetchChanges()
         }
     }
 

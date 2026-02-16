@@ -5,6 +5,7 @@ Both the macOS and iOS itsypad apps sync data via CloudKit using `CKSyncEngine` 
 - **Container:** `iCloud.com.nickustinov.itsypad` (private database)
 - **Zone:** `ItsypadData` (single custom zone for both record types)
 - **Toggle:** `SettingsStore.icloudSync` (persisted in `UserDefaults`)
+- **Schema:** must be deployed from Development to Production via [CloudKit Console](https://icloud.developer.apple.com) before release builds work
 
 
 ## Record types
@@ -46,6 +47,10 @@ final class CloudSyncEngine {
     enum RecordType { case scratchTab, clipboardEntry }
 }
 ```
+
+### Sync version
+
+`CloudSyncEngine` tracks a `syncVersion` constant in `UserDefaults`. When bumped, it clears all local sync metadata and change tokens, forcing a full re-sync. This handles environment transitions (e.g. development to production CloudKit) and schema changes.
 
 ### Data models for incoming changes
 
@@ -102,10 +107,12 @@ struct CloudClipboardRecord {
 ## State persistence
 
 `CKSyncEngine` emits `.stateUpdate` events with serialized state (change tokens, pending changes). Persisted at:
-- `~/Library/Application Support/Itsypad/cloud-sync-state.data`
+- macOS: `~/Library/Application Support/Itsypad/cloud-sync-state.data`
+- iOS: `<app-container>/Library/Application Support/Itsypad/cloud-sync-state.data`
 
 Local cache of `CKRecord` system fields (for conflict detection):
-- `~/Library/Application Support/Itsypad/cloud-record-metadata.json`
+- macOS: `~/Library/Application Support/Itsypad/cloud-record-metadata.json`
+- iOS: `<app-container>/Library/Application Support/Itsypad/cloud-record-metadata.json`
 
 
 ## Integration points in stores
@@ -135,20 +142,53 @@ Local cache of `CKRecord` system fields (for conflict detection):
 
 ## Entitlements
 
-Both entitlements files need:
+### Common (all platforms, all distribution methods)
 
 ```xml
 <key>com.apple.developer.icloud-container-identifiers</key>
 <array>
     <string>iCloud.com.nickustinov.itsypad</string>
 </array>
+<key>com.apple.developer.icloud-container-environment</key>
+<string>Production</string>
 <key>com.apple.developer.icloud-services</key>
 <array>
     <string>CloudKit</string>
 </array>
 ```
 
-The old `com.apple.developer.ubiquity-kvstore-identifier` key can be removed.
+### Developer ID builds only (macOS direct/DMG)
+
+Xcode automatically injects `application-identifier`, `team-identifier`, and `keychain-access-groups` during signing. The manual `codesign` in the build script does not – these must be explicitly included in `itsypad-direct.entitlements`:
+
+```xml
+<key>com.apple.application-identifier</key>
+<string>$(TeamIdentifierPrefix)$(CFBundleIdentifier)</string>
+<key>com.apple.developer.team-identifier</key>
+<string>$(TeamIdentifier)</string>
+<key>keychain-access-groups</key>
+<array>
+    <string>$(TeamIdentifierPrefix)*</string>
+</array>
+```
+
+The build script (`scripts/build-release.sh`) resolves these variables via sed during the entitlement resolution step. Without these entitlements, CloudKit fails silently with `CKError.missingEntitlement` (code 8) and `CKSyncEngine` never sends or receives records.
+
+### App Store and iOS builds
+
+No extra entitlements needed beyond the common ones – Xcode's automatic signing handles `application-identifier`, `team-identifier`, and `keychain-access-groups`.
+
+
+## CloudKit Console setup
+
+The CloudKit schema is auto-created in the **Development** environment when running from Xcode. Before any release build (Developer ID, App Store, or TestFlight) will work, the schema must be deployed to **Production**:
+
+1. Go to [CloudKit Console](https://icloud.developer.apple.com)
+2. Select `iCloud.com.nickustinov.itsypad`
+3. Verify `ScratchTab` and `ClipboardEntry` record types exist in Development
+4. Click **Deploy Schema Changes** to push to Production
+
+This only needs to be done once (and again whenever record types or fields change).
 
 
 ## What to remove from iOS (migrating from KVS)
@@ -170,7 +210,7 @@ The old `com.apple.developer.ubiquity-kvstore-identifier` key can be removed.
 - `applyCloudTab()` / `removeCloudTab()` on TabStore
 - `applyCloudClipboardEntry()` / `removeCloudClipboardEntry()` on ClipboardStore
 - `recordChanged()` / `recordDeleted()` calls at each store mutation point
-- CloudKit entitlements (container identifiers + services)
+- CloudKit entitlements (container identifiers + environment + services)
 - Call `CloudSyncEngine.shared.startIfEnabled()` at app launch
 
 

@@ -5,6 +5,10 @@ struct ItsypadApp: App {
     @StateObject private var tabStore = TabStore.shared
     @StateObject private var settings = SettingsStore.shared
 
+    init() {
+        CloudSyncEngine.shared.startIfEnabled()
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()
