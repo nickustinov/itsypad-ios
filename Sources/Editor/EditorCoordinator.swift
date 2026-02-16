@@ -497,13 +497,13 @@ class EditorCoordinator: NSObject, UITextViewDelegate {
         // Backspace at list prefix boundary
         if text.isEmpty && range.length == 1 {
             let lineRange = ns.lineRange(for: NSRange(location: range.location, length: 0))
-            let columnOffset = range.location - lineRange.location
+            let cursorOffset = range.location + range.length - lineRange.location
             let lineText = ns.substring(with: lineRange)
             let cleanLine = lineText.hasSuffix("\n") ? String(lineText.dropLast()) : lineText
             let listsAllowed = language == "plain" || language == "markdown"
 
             if listsAllowed, let match = ListHelper.parseLine(cleanLine), ListHelper.isKindEnabled(match.kind),
-               columnOffset == match.contentStart {
+               cursorOffset == match.contentStart {
                 let prefixRange = NSRange(location: lineRange.location, length: match.contentStart)
                 tv.textStorage.replaceCharacters(in: prefixRange, with: match.indent)
                 tv.selectedRange = NSRange(location: lineRange.location + match.indent.count, length: 0)
