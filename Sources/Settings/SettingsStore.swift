@@ -114,6 +114,13 @@ class SettingsStore: ObservableObject {
         }
     }
 
+    @Published var lockRotation: Bool = true {
+        didSet {
+            guard !isLoading else { return }
+            defaults.set(lockRotation, forKey: "lockRotation")
+        }
+    }
+
     @Published var icloudSync: Bool = true
 
     func setICloudSync(_ enabled: Bool) {
@@ -159,6 +166,7 @@ class SettingsStore: ObservableObject {
         letterSpacing = defaults.double(forKey: "letterSpacing")
         wordWrap = defaults.object(forKey: "wordWrap") as? Bool ?? true
         showLineNumbers = defaults.object(forKey: "showLineNumbers") as? Bool ?? false
+        lockRotation = defaults.object(forKey: "lockRotation") as? Bool ?? true
         icloudSync = defaults.object(forKey: "icloudSync") as? Bool ?? true
     }
 }

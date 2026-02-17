@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct ItsypadApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var tabStore = TabStore.shared
     @StateObject private var settings = SettingsStore.shared
 

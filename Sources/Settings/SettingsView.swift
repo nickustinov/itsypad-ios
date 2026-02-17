@@ -82,6 +82,9 @@ struct SettingsView: View {
                     Toggle("Word wrap", isOn: $settings.wordWrap)
                     Toggle("Line numbers", isOn: $settings.showLineNumbers)
                     Toggle("Clickable links", isOn: $settings.clickableLinks)
+                    if UIDevice.current.userInterfaceIdiom == .phone {
+                        Toggle("Lock rotation", isOn: $settings.lockRotation)
+                    }
                 }
 
                 Section {
