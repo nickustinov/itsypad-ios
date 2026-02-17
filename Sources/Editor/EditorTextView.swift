@@ -265,7 +265,7 @@ final class EditorTextView: UITextView {
         delegate?.textViewDidChange?(self)
     }
 
-    @objc private func toggleChecklistCommand() {
+    @objc func toggleChecklistCommand() {
         guard listsAllowed, SettingsStore.shared.checklistsEnabled else { return }
         let ns = text as NSString
         let sel = selectedRange

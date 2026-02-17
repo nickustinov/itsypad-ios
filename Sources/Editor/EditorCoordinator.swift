@@ -384,6 +384,22 @@ class EditorCoordinator: NSObject, UITextViewDelegate {
     /// must not reset `textView.text` from the (stale) tab-store content.
     var pendingLocalEdits = 0
 
+    func textView(_ textView: UITextView, editMenuForTextIn range: NSRange, suggestedActions: [UIMenuElement]) -> UIMenu? {
+        guard let tv = textView as? EditorTextView else {
+            return UIMenu(children: suggestedActions)
+        }
+        let lang = language
+        let listsAllowed = lang == "plain" || lang == "markdown"
+        guard listsAllowed, SettingsStore.shared.checklistsEnabled else {
+            return UIMenu(children: suggestedActions)
+        }
+
+        let toggleAction = UIAction(title: "Toggle checklist") { _ in
+            tv.toggleChecklistCommand()
+        }
+        return UIMenu(children: suggestedActions + [toggleAction])
+    }
+
     func textViewDidChangeSelection(_ textView: UITextView) {
         guard let tv = textView as? EditorTextView else { return }
         tv.onCursorChange?(tv.selectedRange.location)
