@@ -73,10 +73,24 @@ final class EditorTextView: UITextView {
             self, selector: #selector(keyboardWillChangeFrame(_:)),
             name: UIResponder.keyboardWillChangeFrameNotification, object: nil
         )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(appDidBecomeActive),
+            name: UIApplication.didBecomeActiveNotification, object: nil
+        )
     }
 
     deinit {
         NotificationCenter.default.removeObserver(self)
+    }
+
+    // MARK: - Foreground restore
+
+    @objc private func appDidBecomeActive() {
+        guard window != nil else { return }
+        // Cycle isEditable to reset UITextInteraction gesture recognizers
+        // that can get stuck after the app returns from background.
+        isEditable = false
+        isEditable = true
     }
 
     // MARK: - Keyboard avoidance

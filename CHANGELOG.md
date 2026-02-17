@@ -4,6 +4,7 @@
 
 - Add "Toggle checklist" to text selection context menu
 - Add "Lock rotation" setting for iPhone (enabled by default)
+- Fix editor not responding to taps after returning from background
 - Add word wrap setting (default: on) with horizontal scrolling when off
 - Add line numbers setting with gutter view
 - Move toolbar buttons to floating bottom bar with Liquid Glass support
