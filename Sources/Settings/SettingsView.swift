@@ -97,6 +97,15 @@ struct SettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+                    Link(destination: URL(string: "https://github.com/nickustinov/itsypad-macos/discussions")!) {
+                        HStack {
+                            Text("Community")
+                            Spacer()
+                            Image(systemName: "arrow.up.right")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 } footer: {
                     Text("Itsypad \(appVersion) (\(appBuild))")
                         .frame(maxWidth: .infinity)

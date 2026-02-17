@@ -24,6 +24,10 @@ struct EditorView: UIViewRepresentable {
     private static var gutterViews: [UUID: LineNumberGutterView] = [:]
     private static var scrollWrappers: [UUID: EditorScrollWrapper] = [:]
 
+    static func textView(for tabID: UUID) -> EditorTextView? {
+        textViews[tabID]
+    }
+
     static func cleanupRemovedTabs(activeIDs: Set<UUID>) {
         let staleKeys = Set(textViews.keys).subtracting(activeIDs)
         for key in staleKeys {

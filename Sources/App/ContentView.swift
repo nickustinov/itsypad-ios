@@ -322,6 +322,34 @@ struct ContentView: View {
             }
             Divider()
             Button {
+                if let id = tabStore.selectedTabID,
+                   let tv = EditorView.textView(for: id) {
+                    tv.becomeFirstResponder()
+                    DispatchQueue.main.async { tv.toggleChecklist() }
+                }
+            } label: {
+                Label("Checklist", systemImage: "checklist")
+            }
+            Button {
+                if let id = tabStore.selectedTabID,
+                   let tv = EditorView.textView(for: id) {
+                    tv.becomeFirstResponder()
+                    DispatchQueue.main.async { tv.toggleBulletList() }
+                }
+            } label: {
+                Label("Bullet list", systemImage: "list.bullet")
+            }
+            Button {
+                if let id = tabStore.selectedTabID,
+                   let tv = EditorView.textView(for: id) {
+                    tv.becomeFirstResponder()
+                    DispatchQueue.main.async { tv.toggleNumberedList() }
+                }
+            } label: {
+                Label("Numbered list", systemImage: "list.number")
+            }
+            Divider()
+            Button {
                 showSettings = true
             } label: {
                 Label("Settings...", systemImage: "gearshape")

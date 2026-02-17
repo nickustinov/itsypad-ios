@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add bullet list and numbered list toggles to the file menu and text selection edit menu
+- Add keyboard shortcuts for bullet list (Cmd+Shift+B) and numbered list (Cmd+Shift+N)
+- Add community link to settings
 - Add "Toggle checklist" to text selection context menu
 - Add "Lock rotation" setting for iPhone (enabled by default)
 - Fix editor not responding to taps after returning from background

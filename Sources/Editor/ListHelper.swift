@@ -162,6 +162,44 @@ enum ListHelper {
         }
     }
 
+    // MARK: - Toggle bullet list
+
+    static func toggleBullet(line: String) -> String {
+        guard let match = parseLine(line) else {
+            let indent = line.prefix { $0 == " " || $0 == "\t" }
+            let content = line.dropFirst(indent.count)
+            return indent + "- " + content
+        }
+
+        switch match.kind {
+        case .bullet:
+            let content = String(line.dropFirst(match.contentStart))
+            return match.indent + content
+        case .ordered, .unchecked, .checked:
+            let content = String(line.dropFirst(match.contentStart))
+            return match.indent + "- " + content
+        }
+    }
+
+    // MARK: - Toggle numbered list
+
+    static func toggleNumbered(line: String, number: Int) -> String {
+        guard let match = parseLine(line) else {
+            let indent = line.prefix { $0 == " " || $0 == "\t" }
+            let content = line.dropFirst(indent.count)
+            return indent + "\(number). " + content
+        }
+
+        switch match.kind {
+        case .ordered:
+            let content = String(line.dropFirst(match.contentStart))
+            return match.indent + content
+        case .bullet, .unchecked, .checked:
+            let content = String(line.dropFirst(match.contentStart))
+            return match.indent + "\(number). " + content
+        }
+    }
+
     // MARK: - Swap lines
 
     static func swapLines(

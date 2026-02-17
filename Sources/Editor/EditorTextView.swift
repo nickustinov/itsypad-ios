@@ -163,6 +163,26 @@ final class EditorTextView: UITextView {
             ))
         }
 
+        // Cmd+Shift+B — toggle bullet list
+        if listsAllowed && SettingsStore.shared.bulletListsEnabled {
+            commands.append(UIKeyCommand(
+                action: #selector(toggleBulletCommand),
+                input: "b",
+                modifierFlags: [.command, .shift],
+                discoverabilityTitle: "Toggle bullet list"
+            ))
+        }
+
+        // Cmd+Shift+N — toggle numbered list
+        if listsAllowed && SettingsStore.shared.numberedListsEnabled {
+            commands.append(UIKeyCommand(
+                action: #selector(toggleNumberedCommand),
+                input: "n",
+                modifierFlags: [.command, .shift],
+                discoverabilityTitle: "Toggle numbered list"
+            ))
+        }
+
         // Shift+Tab — outdent
         commands.append(UIKeyCommand(
             action: #selector(handleShiftTab),
@@ -280,23 +300,65 @@ final class EditorTextView: UITextView {
     }
 
     @objc func toggleChecklistCommand() {
-        guard listsAllowed, SettingsStore.shared.checklistsEnabled else { return }
+        toggleChecklist()
+    }
+
+    @objc private func toggleBulletCommand() {
+        toggleBulletList()
+    }
+
+    @objc private func toggleNumberedCommand() {
+        toggleNumberedList()
+    }
+
+    // MARK: - List toggle actions
+
+    private func toggleLines(transform: @escaping (String) -> String) {
         let ns = text as NSString
         let sel = selectedRange
         let lineRange = ns.lineRange(for: sel)
+        let blockText = ns.substring(with: lineRange)
+        let endsWithNewline = blockText.hasSuffix("\n")
 
         var newLines: [String] = []
-        let blockText = ns.substring(with: lineRange)
         blockText.enumerateLines { line, _ in
-            newLines.append(ListHelper.toggleChecklist(line: line))
+            newLines.append(transform(line))
         }
 
         var newText = newLines.joined(separator: "\n")
-        if blockText.hasSuffix("\n") { newText += "\n" }
+        if endsWithNewline { newText += "\n" }
 
         textStorage.replaceCharacters(in: lineRange, with: newText)
-        selectedRange = NSRange(location: lineRange.location, length: newText.count - (blockText.hasSuffix("\n") ? 1 : 0))
+
+        if sel.length == 0, newLines.count == 1 {
+            let oldLine = endsWithNewline ? String(blockText.dropLast()) : blockText
+            let delta = newLines[0].count - oldLine.count
+            let newCursor = max(lineRange.location, sel.location + delta)
+            selectedRange = NSRange(location: min(newCursor, lineRange.location + newLines[0].count), length: 0)
+        } else {
+            selectedRange = NSRange(location: lineRange.location, length: newText.count - (endsWithNewline ? 1 : 0))
+        }
+
         delegate?.textViewDidChange?(self)
+    }
+
+    func toggleChecklist() {
+        guard listsAllowed, SettingsStore.shared.checklistsEnabled else { return }
+        toggleLines { line in ListHelper.toggleChecklist(line: line) }
+    }
+
+    func toggleBulletList() {
+        guard listsAllowed, SettingsStore.shared.bulletListsEnabled else { return }
+        toggleLines { line in ListHelper.toggleBullet(line: line) }
+    }
+
+    func toggleNumberedList() {
+        guard listsAllowed, SettingsStore.shared.numberedListsEnabled else { return }
+        var number = 1
+        toggleLines { line in
+            defer { number += 1 }
+            return ListHelper.toggleNumbered(line: line, number: number)
+        }
     }
 
     @objc private func handleShiftTab() {
