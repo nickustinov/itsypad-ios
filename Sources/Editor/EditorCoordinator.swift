@@ -424,17 +424,17 @@ class EditorCoordinator: NSObject, UITextViewDelegate {
         var listChildren: [UIMenuElement] = []
 
         if store.checklistsEnabled {
-            listChildren.append(UIAction(title: "Checklist", image: UIImage(systemName: "checklist")) { _ in
+            listChildren.append(UIAction(title: String(localized: "menu.edit.checklist", defaultValue: "Checklist"), image: UIImage(systemName: "checklist")) { _ in
                 tv.toggleChecklist()
             })
         }
         if store.bulletListsEnabled {
-            listChildren.append(UIAction(title: "Bullet list", image: UIImage(systemName: "list.bullet")) { _ in
+            listChildren.append(UIAction(title: String(localized: "menu.edit.bullet_list", defaultValue: "Bullet list"), image: UIImage(systemName: "list.bullet")) { _ in
                 tv.toggleBulletList()
             })
         }
         if store.numberedListsEnabled {
-            listChildren.append(UIAction(title: "Numbered list", image: UIImage(systemName: "list.number")) { _ in
+            listChildren.append(UIAction(title: String(localized: "menu.edit.numbered_list", defaultValue: "Numbered list"), image: UIImage(systemName: "list.number")) { _ in
                 tv.toggleNumberedList()
             })
         }

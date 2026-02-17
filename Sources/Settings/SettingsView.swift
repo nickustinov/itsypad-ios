@@ -15,48 +15,48 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Sync") {
-                    Toggle("iCloud sync", isOn: Binding(
+                Section(String(localized: "settings.sync.title", defaultValue: "Sync")) {
+                    Toggle(String(localized: "settings.sync.icloud", defaultValue: "iCloud sync"), isOn: Binding(
                         get: { settings.icloudSync },
                         set: { settings.setICloudSync($0) }
                     ))
                 }
 
-                Section("Appearance") {
-                    Picker("Mode", selection: $settings.appearanceOverride) {
-                        Text("System").tag("system")
-                        Text("Light").tag("light")
-                        Text("Dark").tag("dark")
+                Section(String(localized: "settings.appearance.title", defaultValue: "Appearance")) {
+                    Picker(String(localized: "settings.appearance.mode", defaultValue: "Mode"), selection: $settings.appearanceOverride) {
+                        Text(String(localized: "settings.appearance.system", defaultValue: "System")).tag("system")
+                        Text(String(localized: "settings.appearance.light", defaultValue: "Light")).tag("light")
+                        Text(String(localized: "settings.appearance.dark", defaultValue: "Dark")).tag("dark")
                     }
 
-                    Picker("Syntax theme", selection: $settings.syntaxTheme) {
+                    Picker(String(localized: "settings.appearance.syntax_theme", defaultValue: "Syntax theme"), selection: $settings.syntaxTheme) {
                         ForEach(SyntaxThemeRegistry.themes, id: \.id) { theme in
                             Text(theme.displayName).tag(theme.id)
                         }
                     }
 
                     HStack {
-                        Text("Font size")
+                        Text(String(localized: "settings.appearance.font_size", defaultValue: "Font size"))
                         Spacer()
                         Stepper("\(Int(settings.editorFontSize))", value: $settings.editorFontSize, in: 8...32, step: 1)
                     }
                 }
 
-                Section("Indentation") {
-                    Toggle("Indent using spaces", isOn: $settings.indentUsingSpaces)
+                Section(String(localized: "settings.indentation.title", defaultValue: "Indentation")) {
+                    Toggle(String(localized: "settings.indentation.use_spaces", defaultValue: "Indent using spaces"), isOn: $settings.indentUsingSpaces)
 
                     Stepper("Tab width: \(settings.tabWidth)", value: $settings.tabWidth, in: 1...8)
                 }
 
-                Section("Lists") {
-                    Toggle("Bullet lists", isOn: $settings.bulletListsEnabled)
-                    Toggle("Numbered lists", isOn: $settings.numberedListsEnabled)
-                    Toggle("Checklists", isOn: $settings.checklistsEnabled)
+                Section(String(localized: "settings.lists.title", defaultValue: "Lists")) {
+                    Toggle(String(localized: "settings.lists.bullet", defaultValue: "Bullet lists"), isOn: $settings.bulletListsEnabled)
+                    Toggle(String(localized: "settings.lists.numbered", defaultValue: "Numbered lists"), isOn: $settings.numberedListsEnabled)
+                    Toggle(String(localized: "settings.lists.checklists", defaultValue: "Checklists"), isOn: $settings.checklistsEnabled)
                 }
 
-                Section("Spacing") {
+                Section(String(localized: "settings.spacing.title", defaultValue: "Spacing")) {
                     HStack {
-                        Text("Line spacing")
+                        Text(String(localized: "settings.spacing.line", defaultValue: "Line spacing"))
                         Spacer()
                         Stepper(
                             String(format: "%.1f", settings.lineSpacing),
@@ -67,7 +67,7 @@ struct SettingsView: View {
                     }
 
                     HStack {
-                        Text("Letter spacing")
+                        Text(String(localized: "settings.spacing.letter", defaultValue: "Letter spacing"))
                         Spacer()
                         Stepper(
                             String(format: "%.1f", settings.letterSpacing),
@@ -78,19 +78,19 @@ struct SettingsView: View {
                     }
                 }
 
-                Section("Editor") {
-                    Toggle("Word wrap", isOn: $settings.wordWrap)
-                    Toggle("Line numbers", isOn: $settings.showLineNumbers)
-                    Toggle("Clickable links", isOn: $settings.clickableLinks)
+                Section(String(localized: "settings.editor.title", defaultValue: "Editor")) {
+                    Toggle(String(localized: "settings.editor.word_wrap", defaultValue: "Word wrap"), isOn: $settings.wordWrap)
+                    Toggle(String(localized: "settings.editor.line_numbers", defaultValue: "Line numbers"), isOn: $settings.showLineNumbers)
+                    Toggle(String(localized: "settings.editor.clickable_links", defaultValue: "Clickable links"), isOn: $settings.clickableLinks)
                     if UIDevice.current.userInterfaceIdiom == .phone {
-                        Toggle("Lock rotation", isOn: $settings.lockRotation)
+                        Toggle(String(localized: "settings.editor.lock_rotation", defaultValue: "Lock rotation"), isOn: $settings.lockRotation)
                     }
                 }
 
                 Section {
                     Link(destination: URL(string: "https://itsypad.app")!) {
                         HStack {
-                            Text("itsypad.app")
+                            Text(String(localized: "settings.about.website", defaultValue: "itsypad.app"))
                             Spacer()
                             Image(systemName: "arrow.up.right")
                                 .font(.footnote)
@@ -99,7 +99,7 @@ struct SettingsView: View {
                     }
                     Link(destination: URL(string: "https://github.com/nickustinov/itsypad-macos/discussions")!) {
                         HStack {
-                            Text("Community")
+                            Text(String(localized: "settings.about.community", defaultValue: "Community"))
                             Spacer()
                             Image(systemName: "arrow.up.right")
                                 .font(.footnote)
@@ -112,11 +112,11 @@ struct SettingsView: View {
                         .padding(.top, 8)
                 }
             }
-            .navigationTitle("Settings")
+            .navigationTitle(String(localized: "settings.title", defaultValue: "Settings"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
+                    Button(String(localized: "common.done", defaultValue: "Done")) { dismiss() }
                 }
             }
         }

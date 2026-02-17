@@ -15,6 +15,7 @@ The iOS companion to [Itsypad](https://itsypad.app) – a tiny, fast scratchpad 
 - Configurable indentation (spaces/tabs, width)
 - Auto-language detection
 - Hardware keyboard support on iPad (Cmd+D duplicate line, Cmd+Return toggle checkbox, Cmd+Shift+L toggle checklist, Cmd+S save, Cmd+Shift+S save as)
+- 12 languages: English, Spanish, French, German, Russian, Japanese, Simplified Chinese, Traditional Chinese, Korean, Portuguese (Brazil), Italian, Polish
 
 ## Requirements
 
@@ -28,6 +29,56 @@ The iOS companion to [Itsypad](https://itsypad.app) – a tiny, fast scratchpad 
 xcodegen generate
 open itsypad-ios.xcodeproj
 ```
+
+## Localization
+
+Itsypad uses a Swift String Catalog (`Sources/Resources/Localizable.xcstrings`) for localization. Translations are managed via [Lokalise](https://lokalise.com).
+
+Languages: English (base), Spanish, French, German, Russian, Japanese, Simplified Chinese, Traditional Chinese, Korean, Portuguese (Brazil), Italian, Polish.
+
+### Setup
+
+```bash
+brew tap lokalise/cli-2
+brew install lokalise2
+cp lokalise.yml.example lokalise.yml
+# Edit lokalise.yml and add your API token
+```
+
+### Push source strings to Lokalise
+
+Extracts English keys and values from the xcstrings file and uploads to Lokalise:
+
+```bash
+scripts/push-translations.sh
+```
+
+### Pull translations from Lokalise
+
+Downloads all translations from Lokalise and merges them into the xcstrings file:
+
+```bash
+scripts/pull-translations.sh
+```
+
+### Adding new strings
+
+All user-facing strings use `String(localized:defaultValue:)` with a structured key:
+
+```swift
+Toggle(String(localized: "settings.appearance.word_wrap", defaultValue: "Word wrap"), isOn: $store.wordWrap)
+Section(String(localized: "settings.spacing.title", defaultValue: "Spacing")) { ... }
+```
+
+Key format: `{area}.{context}.{name}` – e.g. `menu.file.*`, `alert.save_changes.*`, `settings.appearance.*`, `clipboard.*`, `tab.context.*`.
+
+### Workflow after adding new strings
+
+1. Build the project – Xcode auto-populates new keys in `Localizable.xcstrings`
+2. Push source strings to Lokalise: `scripts/push-translations.sh`
+3. Translate in [Lokalise](https://app.lokalise.com) (or let translators handle it)
+4. Pull translations back: `scripts/pull-translations.sh`
+5. Build and verify
 
 ## Architecture
 

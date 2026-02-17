@@ -41,11 +41,11 @@ struct TabGridView: View {
                             dismiss()
                         }
                         .contextMenu {
-                            Button("Rename") {
+                            Button(String(localized: "tab.context.rename", defaultValue: "Rename")) {
                                 renameText = tab.name
                                 renamingTabID = tab.id
                             }
-                            Button("Delete", role: .destructive) {
+                            Button(String(localized: "tab.context.delete", defaultValue: "Delete"), role: .destructive) {
                                 requestClose(tab: tab)
                             }
                         }
@@ -53,11 +53,11 @@ struct TabGridView: View {
                 }
                 .padding(16)
             }
-            .navigationTitle("Tabs")
+            .navigationTitle(String(localized: "tabs.title", defaultValue: "Tabs"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Done") { dismiss() }
+                    Button(String(localized: "common.done", defaultValue: "Done")) { dismiss() }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -68,13 +68,13 @@ struct TabGridView: View {
                     }
                 }
             }
-            .alert("Rename tab", isPresented: .init(
+            .alert(String(localized: "tab.rename.title", defaultValue: "Rename tab"), isPresented: .init(
                 get: { renamingTabID != nil },
                 set: { if !$0 { renamingTabID = nil } }
             )) {
-                TextField("Tab name", text: $renameText)
-                Button("Cancel", role: .cancel) { renamingTabID = nil }
-                Button("Rename") {
+                TextField(String(localized: "tab.rename.placeholder", defaultValue: "Tab name"), text: $renameText)
+                Button(String(localized: "alert.save_changes.cancel", defaultValue: "Cancel"), role: .cancel) { renamingTabID = nil }
+                Button(String(localized: "tab.context.rename", defaultValue: "Rename")) {
                     if let id = renamingTabID {
                         tabStore.renameTab(id: id, name: renameText)
                     }
@@ -82,10 +82,13 @@ struct TabGridView: View {
                 }
             }
             .alert(
-                "Do you want to save changes to \"\(tabStore.tabs.first { $0.id == pendingCloseTabID }?.name ?? "Untitled")\"?",
+                {
+                    let name = tabStore.tabs.first { $0.id == pendingCloseTabID }?.name ?? String(localized: "tab.untitled", defaultValue: "Untitled")
+                    return String(localized: "alert.save_changes.title", defaultValue: "Do you want to save changes to \"\(name)\"?")
+                }(),
                 isPresented: $showCloseConfirmation
             ) {
-                Button("Save") {
+                Button(String(localized: "alert.save_changes.save", defaultValue: "Save")) {
                     if let id = pendingCloseTabID {
                         if let tab = tabStore.tabs.first(where: { $0.id == id }), tab.fileURL != nil {
                             tabStore.saveFile(id: id)
@@ -99,23 +102,23 @@ struct TabGridView: View {
                         pendingCloseTabID = nil
                     }
                 }
-                Button("Don't save", role: .destructive) {
+                Button(String(localized: "alert.save_changes.dont_save", defaultValue: "Don't save"), role: .destructive) {
                     if let id = pendingCloseTabID {
                         tabStore.closeTab(id: id)
                     }
                     pendingCloseTabID = nil
                 }
-                Button("Cancel", role: .cancel) {
+                Button(String(localized: "alert.save_changes.cancel", defaultValue: "Cancel"), role: .cancel) {
                     pendingCloseTabID = nil
                 }
             } message: {
-                Text("Your changes will be lost if you don't save them.")
+                Text(String(localized: "alert.save_changes.message", defaultValue: "Your changes will be lost if you don't save them."))
             }
             .fileExporter(
                 isPresented: $showSaveAsExporter,
                 document: TextFileDocument(content: tabStore.tabs.first { $0.id == pendingCloseTabID }?.content ?? ""),
                 contentType: .plainText,
-                defaultFilename: tabStore.tabs.first { $0.id == pendingCloseTabID }?.name ?? "Untitled"
+                defaultFilename: tabStore.tabs.first { $0.id == pendingCloseTabID }?.name ?? String(localized: "tab.untitled", defaultValue: "Untitled")
             ) { result in
                 if case .success(let url) = result, let id = pendingCloseTabID {
                     tabStore.completeSaveAs(id: id, url: url)

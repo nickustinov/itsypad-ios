@@ -5,6 +5,20 @@ options:
     iOS: "17.0"
   xcodeVersion: "16.0"
   generateEmptyDirectories: false
+  knownRegions:
+    - en
+    - es
+    - fr
+    - de
+    - ru
+    - ja
+    - zh-Hans
+    - zh-Hant
+    - ko
+    - pt-BR
+    - it
+    - pl
+    - Base
 
 settings:
   base:
@@ -47,13 +61,14 @@ targets:
         PRODUCT_NAME: Itsypad
         PRODUCT_MODULE_NAME: ItsypadCore
         MARKETING_VERSION: "1.0.0"
-        CURRENT_PROJECT_VERSION: "106"
+        CURRENT_PROJECT_VERSION: "108"
         CODE_SIGN_ENTITLEMENTS: Sources/itsypad-ios.entitlements
         SWIFT_VERSION: "5.9"
         IPHONEOS_DEPLOYMENT_TARGET: "17.0"
         TARGETED_DEVICE_FAMILY: "1,2"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SUPPORTS_MAC_DESIGNED_FOR_IPHONE: false
+        SWIFT_EMIT_LOC_STRINGS: "YES"
         INFOPLIST_KEY_CFBundleDisplayName: Itsypad
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
 

@@ -104,27 +104,29 @@ class TabStore: ObservableObject {
         CloudSyncEngine.shared.recordChanged(tab.id)
     }
 
-    static let welcomeContent = """
-    # Welcome to Itsypad for iOS
+    static var welcomeContent: String {
+        String(localized: "welcome.content", defaultValue: """
+        # Welcome to Itsypad for iOS
 
-    A tiny, fast scratchpad that lives in your pocket.
+        A tiny, fast scratchpad that lives in your pocket.
 
-    Here's what you can do:
+        Here's what you can do:
 
-    - [x] Download Itsypad
-    - [ ] Write notes, ideas, code snippets
-    - [ ] Use automatic checklists, bullet and numbered lists
-    - [ ] Try Itsypad for macOS
-    - [ ] Browse clipboard history from Mac
-    - [ ] Sync tabs across devices with iCloud
-    - [ ] Switch between themes in settings
+        - [x] Download Itsypad
+        - [ ] Write notes, ideas, code snippets
+        - [ ] Use automatic checklists, bullet and numbered lists
+        - [ ] Try Itsypad for macOS
+        - [ ] Browse clipboard history from Mac
+        - [ ] Sync tabs across devices with iCloud
+        - [ ] Switch between themes in settings
 
-    Happy writing! Close this tab whenever you're ready to start.
-    """
+        Happy writing! Close this tab whenever you're ready to start.
+        """)
+    }
 
     func addWelcomeTab() {
         let tab = TabData(
-            name: "Welcome to Itsypad for iOS",
+            name: String(localized: "welcome.tab_name", defaultValue: "Welcome to Itsypad for iOS"),
             content: Self.welcomeContent,
             language: "markdown"
         )

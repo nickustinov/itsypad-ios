@@ -59,7 +59,7 @@ struct ContentView: View {
             isPresented: $showFileExporter,
             document: TextFileDocument(content: tabStore.selectedTab?.content ?? ""),
             contentType: .plainText,
-            defaultFilename: tabStore.selectedTab?.name ?? "Untitled"
+            defaultFilename: tabStore.selectedTab?.name ?? String(localized: "tab.untitled", defaultValue: "Untitled")
         ) { result in
             switch result {
             case .success(let url):
@@ -71,10 +71,13 @@ struct ContentView: View {
             }
         }
         .alert(
-            "Do you want to save changes to \"\(tabStore.tabs.first { $0.id == pendingCloseTabID }?.name ?? "Untitled")\"?",
+            {
+                let name = tabStore.tabs.first { $0.id == pendingCloseTabID }?.name ?? String(localized: "tab.untitled", defaultValue: "Untitled")
+                return String(localized: "alert.save_changes.title", defaultValue: "Do you want to save changes to \"\(name)\"?")
+            }(),
             isPresented: $showCloseConfirmation
         ) {
-            Button("Save") {
+            Button(String(localized: "alert.save_changes.save", defaultValue: "Save")) {
                 if let id = pendingCloseTabID {
                     if tabStore.selectedTabNeedsSaveAs {
                         showFileExporter = true
@@ -85,23 +88,23 @@ struct ContentView: View {
                 }
                 pendingCloseTabID = nil
             }
-            Button("Don't save", role: .destructive) {
+            Button(String(localized: "alert.save_changes.dont_save", defaultValue: "Don't save"), role: .destructive) {
                 if let id = pendingCloseTabID {
                     tabStore.closeTab(id: id)
                 }
                 pendingCloseTabID = nil
             }
-            Button("Cancel", role: .cancel) {
+            Button(String(localized: "alert.save_changes.cancel", defaultValue: "Cancel"), role: .cancel) {
                 pendingCloseTabID = nil
             }
         } message: {
-            Text("Your changes will be lost if you don't save them.")
+            Text(String(localized: "alert.save_changes.message", defaultValue: "Your changes will be lost if you don't save them."))
         }
-        .alert("Can't open file", isPresented: Binding(
+        .alert(String(localized: "alert.file_open.title", defaultValue: "Can't open file"), isPresented: Binding(
             get: { fileOpenError != nil },
             set: { if !$0 { fileOpenError = nil } }
         )) {
-            Button("OK") { fileOpenError = nil }
+            Button(String(localized: "alert.file_open.ok", defaultValue: "OK")) { fileOpenError = nil }
         } message: {
             if let fileOpenError {
                 Text(fileOpenError)
@@ -144,14 +147,14 @@ struct ContentView: View {
                                         tabStore.closeTab(id: tab.id)
                                     }
                                 } label: {
-                                    Label("Close", systemImage: "xmark")
+                                    Label(String(localized: "menu.file.close", defaultValue: "Close"), systemImage: "xmark")
                                 }
                             }
                     }
                 }
                 .padding(12)
             }
-            .navigationTitle("Tabs")
+            .navigationTitle(String(localized: "tabs.title", defaultValue: "Tabs"))
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button { tabStore.addNewTab() } label: {
@@ -182,7 +185,7 @@ struct ContentView: View {
 
         return VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 4) {
-                Text(tab.name.isEmpty ? "Untitled" : tab.name)
+                Text(tab.name.isEmpty ? String(localized: "tab.untitled", defaultValue: "Untitled") : tab.name)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(isSelected ? Color.accentColor : .primary)
                     .lineLimit(1)
@@ -288,7 +291,7 @@ struct ContentView: View {
             Button {
                 showFileImporter = true
             } label: {
-                Label("Open...", systemImage: "doc")
+                Label(String(localized: "menu.file.open", defaultValue: "Open..."), systemImage: "doc")
             }
             Button {
                 if let id = tabStore.selectedTabID {
@@ -299,13 +302,13 @@ struct ContentView: View {
                     }
                 }
             } label: {
-                Label("Save", systemImage: "square.and.arrow.down")
+                Label(String(localized: "menu.file.save", defaultValue: "Save"), systemImage: "square.and.arrow.down")
             }
             .keyboardShortcut("s", modifiers: .command)
             Button {
                 showFileExporter = true
             } label: {
-                Label("Save as...", systemImage: "square.and.arrow.down.on.square")
+                Label(String(localized: "menu.file.save_as", defaultValue: "Save as..."), systemImage: "square.and.arrow.down.on.square")
             }
             .keyboardShortcut("s", modifiers: [.command, .shift])
             Button {
@@ -318,7 +321,7 @@ struct ContentView: View {
                     }
                 }
             } label: {
-                Label("Close", systemImage: "xmark")
+                Label(String(localized: "menu.file.close", defaultValue: "Close"), systemImage: "xmark")
             }
             Divider()
             Button {
@@ -328,7 +331,7 @@ struct ContentView: View {
                     DispatchQueue.main.async { tv.toggleChecklist() }
                 }
             } label: {
-                Label("Checklist", systemImage: "checklist")
+                Label(String(localized: "menu.edit.checklist", defaultValue: "Checklist"), systemImage: "checklist")
             }
             Button {
                 if let id = tabStore.selectedTabID,
@@ -337,7 +340,7 @@ struct ContentView: View {
                     DispatchQueue.main.async { tv.toggleBulletList() }
                 }
             } label: {
-                Label("Bullet list", systemImage: "list.bullet")
+                Label(String(localized: "menu.edit.bullet_list", defaultValue: "Bullet list"), systemImage: "list.bullet")
             }
             Button {
                 if let id = tabStore.selectedTabID,
@@ -346,13 +349,13 @@ struct ContentView: View {
                     DispatchQueue.main.async { tv.toggleNumberedList() }
                 }
             } label: {
-                Label("Numbered list", systemImage: "list.number")
+                Label(String(localized: "menu.edit.numbered_list", defaultValue: "Numbered list"), systemImage: "list.number")
             }
             Divider()
             Button {
                 showSettings = true
             } label: {
-                Label("Settings...", systemImage: "gearshape")
+                Label(String(localized: "menu.app.settings", defaultValue: "Settings..."), systemImage: "gearshape")
             }
         } label: {
             Image(systemName: "ellipsis")

@@ -27,11 +27,13 @@ struct ClipboardView: View {
             ZStack {
                 if filteredEntries.isEmpty {
                     ContentUnavailableView(
-                        searchText.isEmpty ? "No clipboard history" : "No results",
+                        searchText.isEmpty
+                            ? String(localized: "clipboard.empty.title", defaultValue: "No clipboard history")
+                            : String(localized: "clipboard.no_results.title", defaultValue: "No results"),
                         systemImage: searchText.isEmpty ? "clipboard" : "magnifyingglass",
                         description: searchText.isEmpty
-                            ? Text("Copy text on your Mac or tap Paste to capture from this device.")
-                            : Text("No entries match \"\(searchText)\".")
+                            ? Text(String(localized: "clipboard.empty.description", defaultValue: "Copy text on your Mac or tap Paste to capture from this device."))
+                            : Text(verbatim: String(localized: "clipboard.no_results.description", defaultValue: "No entries match the search query."))
                     )
                 } else {
                     List {
@@ -59,7 +61,7 @@ struct ClipboardView: View {
                                     RoundedRectangle(cornerRadius: 10)
                                         .fill(.ultraThinMaterial)
                                         .overlay {
-                                            Label("Copied", systemImage: "checkmark.circle.fill")
+                                            Label(String(localized: "clipboard.copied", defaultValue: "Copied"), systemImage: "checkmark.circle.fill")
                                                 .font(.system(size: 15, weight: .medium))
                                                 .foregroundStyle(.green)
                                         }
@@ -70,12 +72,12 @@ struct ClipboardView: View {
                                 Button {
                                     clipboardStore.copyToClipboard(entry)
                                 } label: {
-                                    Label("Copy", systemImage: "doc.on.doc")
+                                    Label(String(localized: "clipboard.context.copy", defaultValue: "Copy"), systemImage: "doc.on.doc")
                                 }
                                 Button(role: .destructive) {
                                     clipboardStore.deleteEntry(id: entry.id)
                                 } label: {
-                                    Label("Delete", systemImage: "trash")
+                                    Label(String(localized: "clipboard.context.delete", defaultValue: "Delete"), systemImage: "trash")
                                 }
                             } preview: {
                                 ScrollView {
@@ -90,7 +92,7 @@ struct ClipboardView: View {
                                 Button(role: .destructive) {
                                     clipboardStore.deleteEntry(id: entry.id)
                                 } label: {
-                                    Label("Delete", systemImage: "trash")
+                                    Label(String(localized: "clipboard.context.delete", defaultValue: "Delete"), systemImage: "trash")
                                 }
                             }
                             .listRowSeparator(.hidden)
@@ -101,24 +103,24 @@ struct ClipboardView: View {
                     .listStyle(.plain)
                 }
             }
-            .navigationTitle("Clipboard")
+            .navigationTitle(String(localized: "clipboard.title", defaultValue: "Clipboard"))
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always))
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Done") { dismiss() }
+                    Button(String(localized: "common.done", defaultValue: "Done")) { dismiss() }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         Button {
                             clipboardStore.captureFromPasteboard()
                         } label: {
-                            Label("Paste from clipboard", systemImage: "clipboard")
+                            Label(String(localized: "clipboard.paste_from", defaultValue: "Paste from clipboard"), systemImage: "clipboard")
                         }
                         Button(role: .destructive) {
                             showClearConfirmation = true
                         } label: {
-                            Label("Clear all", systemImage: "trash")
+                            Label(String(localized: "clipboard.clear_all", defaultValue: "Clear all"), systemImage: "trash")
                         }
                         .disabled(clipboardStore.entries.isEmpty)
                     } label: {
@@ -126,16 +128,16 @@ struct ClipboardView: View {
                     }
                 }
             }
-            .alert("Clear clipboard history?", isPresented: $showClearConfirmation) {
-                Button("Clear all", role: .destructive) {
+            .alert(String(localized: "clipboard.clear_alert.title", defaultValue: "Clear clipboard history?"), isPresented: $showClearConfirmation) {
+                Button(String(localized: "clipboard.clear_all", defaultValue: "Clear all"), role: .destructive) {
                     clipboardStore.clearAll()
                 }
-                Button("Cancel", role: .cancel) {}
+                Button(String(localized: "alert.save_changes.cancel", defaultValue: "Cancel"), role: .cancel) {}
             } message: {
                 if SettingsStore.shared.icloudSync {
-                    Text("This will remove all clipboard entries on all your synced devices.")
+                    Text(String(localized: "clipboard.clear_alert.message_sync", defaultValue: "This will remove all clipboard entries on all your synced devices."))
                 } else {
-                    Text("This will remove all clipboard entries on this device.")
+                    Text(String(localized: "clipboard.clear_alert.message_local", defaultValue: "This will remove all clipboard entries on this device."))
                 }
             }
         }
