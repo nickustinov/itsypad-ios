@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Add "Toggle checklist" to text selection context menu
 - Add word wrap setting (default: on) with horizontal scrolling when off
 - Add line numbers setting with gutter view
 - Move toolbar buttons to floating bottom bar with Liquid Glass support
