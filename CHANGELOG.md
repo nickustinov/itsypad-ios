@@ -8,6 +8,7 @@
 - Add localization for 12 languages (Spanish, French, German, Russian, Japanese, Simplified Chinese, Traditional Chinese, Korean, Portuguese Brazil, Italian, Polish)
 - Add "Toggle checklist" to text selection context menu
 - Add "Lock rotation" setting for iPhone (enabled by default)
+- Fix list toggles not inserting prefix on empty last line without trailing newline
 - Fix editor not responding to taps after returning from background
 - Add word wrap setting (default: on) with horizontal scrolling when off
 - Add line numbers setting with gutter view

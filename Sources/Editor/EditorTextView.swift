@@ -321,8 +321,12 @@ final class EditorTextView: UITextView {
         let endsWithNewline = blockText.hasSuffix("\n")
 
         var newLines: [String] = []
-        blockText.enumerateLines { line, _ in
-            newLines.append(transform(line))
+        if blockText.isEmpty {
+            newLines.append(transform(""))
+        } else {
+            blockText.enumerateLines { line, _ in
+                newLines.append(transform(line))
+            }
         }
 
         var newText = newLines.joined(separator: "\n")
