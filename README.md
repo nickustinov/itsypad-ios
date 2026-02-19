@@ -1,7 +1,6 @@
 # Itsypad for iOS
 
 [![Tests](https://github.com/nickustinov/itsypad-ios/actions/workflows/tests.yml/badge.svg)](https://github.com/nickustinov/itsypad-ios/actions/workflows/tests.yml)
-[![Release](https://img.shields.io/github/v/release/nickustinov/itsypad-ios)](https://github.com/nickustinov/itsypad-ios/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Swift 5.9](https://img.shields.io/badge/swift-5.9-orange.svg)](https://swift.org)
 [![iOS 17+](https://img.shields.io/badge/iOS-17%2B-brightgreen.svg)](https://www.apple.com/ios/)
