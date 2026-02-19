@@ -274,6 +274,7 @@ struct ContentView: View {
             }
         }
         .background {
+            #if compiler(>=6.2)
             if #available(iOS 26.0, *) {
                 sidebarThemeBackground
                     .ignoresSafeArea()
@@ -282,6 +283,10 @@ struct ContentView: View {
                 sidebarThemeBackground
                     .ignoresSafeArea()
             }
+            #else
+            sidebarThemeBackground
+                .ignoresSafeArea()
+            #endif
         }
         .navigationBarTitleDisplayMode(.inline)
     }
