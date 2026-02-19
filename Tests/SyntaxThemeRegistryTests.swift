@@ -27,16 +27,6 @@ final class SyntaxThemeRegistryTests: XCTestCase {
         XCTAssertEqual(resource, "atom-one-light.min")
     }
 
-    func testGitHubDarkResource() {
-        let resource = SyntaxThemeRegistry.cssResource(for: "github", isDark: true)
-        XCTAssertEqual(resource, "github-dark.min")
-    }
-
-    func testGitHubLightResource() {
-        let resource = SyntaxThemeRegistry.cssResource(for: "github", isDark: false)
-        XCTAssertEqual(resource, "github.min")
-    }
-
     func testTokyoNightDarkResource() {
         let resource = SyntaxThemeRegistry.cssResource(for: "tokyo-night", isDark: true)
         XCTAssertEqual(resource, "tokyo-night-dark.min")

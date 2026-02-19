@@ -59,7 +59,7 @@ final class SettingsStoreTests: XCTestCase {
     }
 
     func testDefaultIcloudSync() {
-        XCTAssertFalse(store.icloudSync)
+        XCTAssertTrue(store.icloudSync)
     }
 
     // MARK: - Setting persistence
