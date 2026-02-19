@@ -199,7 +199,7 @@ final class TabStoreTests: XCTestCase {
         try "import Foundation".write(to: fileURL, atomically: true, encoding: .utf8)
         defer { try? FileManager.default.removeItem(at: fileURL) }
 
-        store.openFile(url: fileURL)
+        try store.openFile(url: fileURL)
 
         let tab = store.tabs.last!
         XCTAssertEqual(tab.content, "import Foundation")
@@ -217,12 +217,12 @@ final class TabStoreTests: XCTestCase {
         try "print('hi')".write(to: fileURL, atomically: true, encoding: .utf8)
         defer { try? FileManager.default.removeItem(at: fileURL) }
 
-        store.openFile(url: fileURL)
+        try store.openFile(url: fileURL)
         let firstTabID = store.tabs.last!.id
         let tabCount = store.tabs.count
 
         store.addNewTab()
-        store.openFile(url: fileURL)
+        try store.openFile(url: fileURL)
 
         XCTAssertEqual(store.selectedTabID, firstTabID)
         XCTAssertEqual(store.tabs.count, tabCount + 1) // +1 for addNewTab, not for second open
