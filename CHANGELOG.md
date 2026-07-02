@@ -2,6 +2,7 @@
 
 ## 1.2.0
 
+- Fix cursor jumping to the end of the text when iCloud sync applies changes from another device
 - Fix text and cursor hidden under the keyboard after switching tabs while the keyboard is open
 - Fix iCloud sync not receiving remote changes until relaunch (missing push notification registration)
 - Fix iCloud sync conflict resolution re-uploading stale content and reverting newer edits from other devices

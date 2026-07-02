@@ -152,6 +152,7 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: UIScene.didEnterBackgroundNotification)) { _ in
             tabStore.saveSession()
+            CloudSyncEngine.shared.flushRecordMetadata()
         }
     }
 

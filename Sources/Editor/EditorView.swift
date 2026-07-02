@@ -275,7 +275,17 @@ struct EditorView: UIViewRepresentable {
             // resetting the text mid-composition destroys the marked text.
             if textView.text != tab.content && coordinator.pendingLocalEdits == 0
                 && textView.markedTextRange == nil {
+                // Preserve the caret across the reset – setting .text moves it
+                // to the end, which yanks the user's position whenever a cloud
+                // change lands mid-reading (same clamping as the macOS merge)
+                let selection = textView.selectedRange
                 textView.text = tab.content
+                let length = (tab.content as NSString).length
+                let location = min(selection.location, length)
+                textView.selectedRange = NSRange(
+                    location: location,
+                    length: min(selection.length, length - location)
+                )
                 coordinator.rehighlight()
             }
         }

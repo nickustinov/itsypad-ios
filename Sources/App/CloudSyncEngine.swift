@@ -124,7 +124,7 @@ final class CloudSyncEngine: @unchecked Sendable {
         dispatchPrecondition(condition: .onQueue(.main))
         syncEngine = nil
         recordMetadata.removeAll()
-        saveRecordMetadata()
+        flushRecordMetadata()
         logger.info("CloudSyncEngine stopped")
     }
 
@@ -200,6 +200,17 @@ final class CloudSyncEngine: @unchecked Sendable {
         }
         metadataSaveWork = work
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.5, execute: work)
+    }
+
+    /// Write pending metadata immediately. The debounced save is lost if the
+    /// process is killed inside the window – a stale/empty metadata file makes
+    /// the next launch look like a first sync and re-uploads everything.
+    func flushRecordMetadata() {
+        dispatchPrecondition(condition: .onQueue(.main))
+        metadataSaveWork?.cancel()
+        metadataSaveWork = nil
+        guard let data = try? JSONEncoder().encode(recordMetadata) else { return }
+        try? data.write(to: metadataURL, options: .atomic)
     }
 
     private func cacheRecordSystemFields(_ record: CKRecord) {
