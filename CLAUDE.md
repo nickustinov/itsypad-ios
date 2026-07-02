@@ -6,8 +6,8 @@ iOS scratchpad and clipboard manager. Swift, UIKit, SwiftUI.
 
 ```bash
 xcodegen generate
-xcodebuild -scheme Itsypad -configuration Debug -destination 'platform=iOS Simulator,name=iPhone 16' build
-xcodebuild -scheme Itsypad -configuration Debug -destination 'platform=iOS Simulator,name=iPhone 16' test
+xcodebuild -scheme Itsypad -configuration Debug -destination 'platform=iOS Simulator,name=iPhone 17' build
+xcodebuild -scheme Itsypad -configuration Debug -destination 'platform=iOS Simulator,name=iPhone 17' test
 ```
 
 Always run `xcodegen generate` after changing `project.yml` or adding/removing source files.
