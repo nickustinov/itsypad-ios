@@ -12,7 +12,15 @@ struct ContentView: View {
     @State private var showFileExporter = false
     @State private var showCloseConfirmation = false
     @State private var pendingCloseTabID: UUID?
+    // The exporter reads the tab it was opened for – never "the selected tab",
+    // which can change (or be closed) between presenting and completing.
+    @State private var exportTabID: UUID?
+    @State private var closeAfterExport = false
     @State private var fileOpenError: String?
+
+    private var exportTab: TabData? {
+        tabStore.tabs.first { $0.id == exportTabID }
+    }
 
     var body: some View {
         Group {
@@ -57,17 +65,34 @@ struct ContentView: View {
         }
         .fileExporter(
             isPresented: $showFileExporter,
-            document: TextFileDocument(content: tabStore.selectedTab?.content ?? ""),
+            document: TextFileDocument(content: exportTab?.content ?? ""),
             contentType: .plainText,
-            defaultFilename: tabStore.selectedTab?.name ?? String(localized: "tab.untitled", defaultValue: "Untitled")
+            defaultFilename: exportTab?.name ?? String(localized: "tab.untitled", defaultValue: "Untitled")
         ) { result in
+            let tabID = exportTabID
+            let shouldClose = closeAfterExport
+            exportTabID = nil
+            closeAfterExport = false
+
             switch result {
             case .success(let url):
-                if let id = tabStore.selectedTabID {
+                if let id = tabID {
                     tabStore.completeSaveAs(id: id, url: url)
+                    if shouldClose {
+                        tabStore.closeTab(id: id)
+                    }
                 }
             case .failure(let error):
                 NSLog("File export failed: \(error)")
+            }
+        }
+        .onChange(of: showFileExporter) { _, isShown in
+            // fileExporter does not invoke onCompletion when the user cancels –
+            // clear the pending export/close state so it can't leak into the
+            // next save. Completion (when it does run) has already consumed it.
+            if !isShown {
+                exportTabID = nil
+                closeAfterExport = false
             }
         }
         .alert(
@@ -79,12 +104,17 @@ struct ContentView: View {
         ) {
             Button(String(localized: "alert.save_changes.save", defaultValue: "Save")) {
                 if let id = pendingCloseTabID {
-                    if tabStore.selectedTabNeedsSaveAs {
+                    let needsSaveAs = tabStore.tabs.first { $0.id == id }?.fileURL == nil
+                    if needsSaveAs {
+                        // Close only after the export completes – closing first
+                        // would destroy the content the exporter is about to write
+                        exportTabID = id
+                        closeAfterExport = true
                         showFileExporter = true
                     } else {
                         tabStore.saveFile(id: id)
+                        tabStore.closeTab(id: id)
                     }
-                    tabStore.closeTab(id: id)
                 }
                 pendingCloseTabID = nil
             }
@@ -110,12 +140,18 @@ struct ContentView: View {
                 Text(fileOpenError)
             }
         }
+        .alert(String(localized: "alert.file_save.title", defaultValue: "Can't save file"), isPresented: Binding(
+            get: { tabStore.fileSaveError != nil },
+            set: { if !$0 { tabStore.fileSaveError = nil } }
+        )) {
+            Button(String(localized: "alert.file_open.ok", defaultValue: "OK")) { tabStore.fileSaveError = nil }
+        } message: {
+            if let error = tabStore.fileSaveError {
+                Text(error)
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: UIScene.didEnterBackgroundNotification)) { _ in
             tabStore.saveSession()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
-            print("[ContentView] willEnterForeground – triggering fetchChanges")
-            CloudSyncEngine.shared.fetchChanges()
         }
     }
 
@@ -301,6 +337,7 @@ struct ContentView: View {
             Button {
                 if let id = tabStore.selectedTabID {
                     if tabStore.selectedTabNeedsSaveAs {
+                        exportTabID = id
                         showFileExporter = true
                     } else {
                         tabStore.saveFile(id: id)
@@ -311,6 +348,7 @@ struct ContentView: View {
             }
             .keyboardShortcut("s", modifiers: .command)
             Button {
+                exportTabID = tabStore.selectedTabID
                 showFileExporter = true
             } label: {
                 Label(String(localized: "menu.file.save_as", defaultValue: "Save as..."), systemImage: "square.and.arrow.down.on.square")

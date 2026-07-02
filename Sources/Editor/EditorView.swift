@@ -38,10 +38,6 @@ struct EditorView: UIViewRepresentable {
         }
     }
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator()
-    }
-
     func makeUIView(context: Context) -> UIView {
         let container = UIView()
         container.backgroundColor = .clear
@@ -73,7 +69,19 @@ struct EditorView: UIViewRepresentable {
             gutterView = existingGutter
             scrollWrapper = existingWrapper
         } else {
-            textView = EditorTextView()
+            // Explicit TextKit 1 stack: the editor accesses layoutManager
+            // throughout (gutter, checkbox taps, wrap control). Letting UIKit
+            // lazily downgrade from TextKit 2 mid-setup leaves the content
+            // size stale until the first edit – bottom content unreachable
+            // under the keyboard until a key is pressed.
+            let textStorage = NSTextStorage()
+            let layoutManager = NSLayoutManager()
+            textStorage.addLayoutManager(layoutManager)
+            let textContainer = NSTextContainer(size: .zero)
+            textContainer.widthTracksTextView = true
+            layoutManager.addTextContainer(textContainer)
+            textView = EditorTextView(frame: .zero, textContainer: textContainer)
+            textView.ownedTextStorage = textStorage
             textView.delegate = coordinator
             coordinator.textView = textView
             Self.textViews[tabID] = textView
@@ -85,6 +93,12 @@ struct EditorView: UIViewRepresentable {
             gutterView = gutter
 
             let wrapper = EditorScrollWrapper()
+            // Fully manually managed (updateHorizontalLayout). With .automatic,
+            // UIKit applies vertical safe-area adjustment inside a Navigation-
+            // Stack and shifts the wrapper's content – the whole text view –
+            // a few points during sheet presentations, while the gutter
+            // (outside the wrapper) stays put: line numbers visibly detach.
+            wrapper.contentInsetAdjustmentBehavior = .never
             wrapper.showsHorizontalScrollIndicator = true
             wrapper.showsVerticalScrollIndicator = false
             wrapper.alwaysBounceHorizontal = false
@@ -100,7 +114,7 @@ struct EditorView: UIViewRepresentable {
             if let tab = tabStore.tabs.first(where: { $0.id == tabID }) {
                 textView.text = tab.content
                 coordinator.language = tab.language
-                let cursorPos = min(tab.cursorPosition, (tab.content as NSString).length)
+                let cursorPos = min(tabStore.cursorPosition(for: tab.id), (tab.content as NSString).length)
                 textView.selectedRange = NSRange(location: cursorPos, length: 0)
             }
 
@@ -111,14 +125,22 @@ struct EditorView: UIViewRepresentable {
                     coordinator?.pendingLocalEdits -= 1
                 }
             }
+            // Safe to call synchronously: cursor positions live outside the
+            // @Published tabs array, so this cannot publish mid-view-update
             textView.onCursorChange = { [weak tabStore] position in
                 tabStore?.updateCursorPosition(id: tabID, position: position)
             }
+            textView.onEdgeSwipe = { [weak tabStore] delta in
+                tabStore?.selectNeighborTab(delta: delta)
+            }
+            for edgePan in textView.edgeGestures {
+                wrapper.panGestureRecognizer.require(toFail: edgePan)
+            }
 
-            // Add tap gesture for checkbox/link handling
-            let tapGesture = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
-            tapGesture.delegate = context.coordinator
-            textView.addGestureRecognizer(tapGesture)
+            // Add tap gesture for checkbox/link handling. Target the text view
+            // itself – the SwiftUI coordinator is recreated per EditorView
+            // instance while the text view (and its gestures) are cached per tab.
+            textView.installTapHandling()
 
             // Apply initial word wrap setting
             textView.wrapsLines = settings.wordWrap
@@ -249,33 +271,14 @@ struct EditorView: UIViewRepresentable {
             // onCursorChange triggers updateUIView before the async
             // onTextChange has delivered the new content, so tab.content
             // is stale and resetting would strip all attributes.
-            if textView.text != tab.content && coordinator.pendingLocalEdits == 0 {
+            // markedTextRange guards active IME composition (e.g. CJK input) –
+            // resetting the text mid-composition destroys the marked text.
+            if textView.text != tab.content && coordinator.pendingLocalEdits == 0
+                && textView.markedTextRange == nil {
                 textView.text = tab.content
                 coordinator.rehighlight()
             }
         }
 
-        // Store cursor reference
-        context.coordinator.textView = textView
-        context.coordinator.tabID = tabID
-        context.coordinator.tabStore = tabStore
-    }
-
-    class Coordinator: NSObject, UIGestureRecognizerDelegate {
-        weak var textView: EditorTextView?
-        var tabID: UUID?
-        weak var tabStore: TabStore?
-
-        @objc func handleTap(_ gesture: UITapGestureRecognizer) {
-            guard let tv = textView else { return }
-            let point = gesture.location(in: tv)
-            if tv.handleTap(at: point) {
-                return
-            }
-        }
-
-        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-            true
-        }
     }
 }

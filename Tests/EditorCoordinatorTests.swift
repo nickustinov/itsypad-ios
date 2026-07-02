@@ -353,6 +353,85 @@ final class EditorCoordinatorTests: XCTestCase {
         XCTAssertTrue(result)
     }
 
+    // MARK: - Keyboard avoidance on window attach
+
+    func testKeyboardOverlapGeometry() {
+        // Exercised directly – notification/static-driven variants race the
+        // host app's real keyboard during test runs
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 800))
+        let tv = EditorTextView(frame: CGRect(x: 0, y: 0, width: 400, height: 800))
+        window.addSubview(tv)
+
+        // Keyboard covering the bottom 300pt
+        tv.applyKeyboardOverlap(CGRect(x: 0, y: 500, width: 400, height: 300))
+        XCTAssertEqual(tv.contentInset.bottom, 300)
+
+        // Keyboard hidden (below the screen)
+        tv.applyKeyboardOverlap(CGRect(x: 0, y: 800, width: 400, height: 300))
+        XCTAssertEqual(tv.contentInset.bottom, 0)
+
+        // Float noise must not count as a change (jitter guard)
+        tv.applyKeyboardOverlap(CGRect(x: 0, y: 500, width: 400, height: 300))
+        tv.applyKeyboardOverlap(CGRect(x: 0, y: 500.0000000000001, width: 400, height: 300))
+        XCTAssertEqual(tv.contentInset.bottom, 300)
+    }
+
+    // MARK: - UTF-16 correctness with emoji
+
+    func testToggleChecklistWithEmojiKeepsCursorAtUTF16Position() {
+        textView.text = "milk 🥛"          // 7 UTF-16 units
+        textView.selectedRange = NSRange(location: 7, length: 0)
+
+        textView.toggleChecklist()
+
+        XCTAssertEqual(textView.text, "- [ ] milk 🥛")
+        // Prefix adds 6 UTF-16 units; cursor must end up at 13, not clamped short
+        XCTAssertEqual(textView.selectedRange.location, 13)
+    }
+
+    func testIndentSelectionWithEmojiSelectsWholeBlock() {
+        textView.text = "🥛 a\n🥛 b"        // two lines, 4 UTF-16 units each + newline
+        textView.selectedRange = NSRange(location: 0, length: (textView.text as NSString).length)
+
+        coordinator.indentLines(tv: textView)
+
+        let expected = (textView.text as NSString).length
+        XCTAssertEqual(textView.selectedRange.length, expected)
+    }
+
+    func testOutdentSelectionWithEmojiSelectsWholeBlock() {
+        textView.text = "    🥛 a\n    🥛 b"
+        textView.selectedRange = NSRange(location: 0, length: (textView.text as NSString).length)
+
+        coordinator.outdentLines(tv: textView)
+
+        XCTAssertEqual(textView.text, "🥛 a\n🥛 b")
+        XCTAssertEqual(textView.selectedRange.length, (textView.text as NSString).length)
+    }
+
+    // MARK: - Keyboard traits per language
+
+    func testPlainLanguageEnablesKeyboardIntelligence() {
+        XCTAssertEqual(textView.autocapitalizationType, .sentences)
+        XCTAssertEqual(textView.autocorrectionType, .default)
+        XCTAssertEqual(textView.spellCheckingType, .default)
+    }
+
+    func testCodeLanguageDisablesKeyboardIntelligence() {
+        coordinator.language = "swift"
+        XCTAssertEqual(textView.autocapitalizationType, .none)
+        XCTAssertEqual(textView.autocorrectionType, .no)
+        XCTAssertEqual(textView.spellCheckingType, .no)
+    }
+
+    func testSwitchingBackToMarkdownRestoresKeyboardIntelligence() {
+        coordinator.language = "swift"
+        coordinator.language = "markdown"
+        XCTAssertEqual(textView.autocapitalizationType, .sentences)
+        XCTAssertEqual(textView.autocorrectionType, .default)
+        XCTAssertEqual(textView.spellCheckingType, .default)
+    }
+
     // MARK: - Regular text input passes through
 
     func testRegularTextReturnsTrue() {

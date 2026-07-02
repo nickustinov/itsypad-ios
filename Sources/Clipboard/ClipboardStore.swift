@@ -25,6 +25,14 @@ class ClipboardStore: ObservableObject {
             self.persistenceURL = itsypadDir.appendingPathComponent("clipboard.json")
         }
         restore()
+
+        // Flush pending debounced saves before the process can be killed
+        NotificationCenter.default.addObserver(
+            forName: UIScene.didEnterBackgroundNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.saveDebounceWork?.cancel()
+            self?.save()
+        }
     }
 
     // MARK: - Entry management
@@ -38,13 +46,19 @@ class ClipboardStore: ObservableObject {
 
         let entry = ClipboardEntry(id: id, text: trimmed, timestamp: timestamp)
         entries.insert(entry, at: 0)
-
-        if entries.count > Self.maxLocal {
-            entries = Array(entries.prefix(Self.maxLocal))
-        }
-
+        trimToLimit()
         scheduleSave()
         CloudSyncEngine.shared.recordChanged(entry.id)
+    }
+
+    /// Entries dropped by the local cap are also deleted from CloudKit –
+    /// otherwise cloud records (and the sync metadata cache) grow without bound.
+    private func trimToLimit() {
+        guard entries.count > Self.maxLocal else { return }
+        for entry in entries.suffix(from: Self.maxLocal) {
+            CloudSyncEngine.shared.recordDeleted(entry.id)
+        }
+        entries = Array(entries.prefix(Self.maxLocal))
     }
 
     func deleteEntry(id: UUID) {
@@ -88,11 +102,7 @@ class ClipboardStore: ObservableObject {
         // Insert in chronological position (entries are sorted newest-first)
         let insertIndex = entries.firstIndex(where: { $0.timestamp < entry.timestamp }) ?? entries.endIndex
         entries.insert(entry, at: insertIndex)
-
-        if entries.count > Self.maxLocal {
-            entries = Array(entries.prefix(Self.maxLocal))
-        }
-
+        trimToLimit()
         scheduleSave()
     }
 
@@ -123,9 +133,12 @@ class ClipboardStore: ObservableObject {
     }
 
     private func restore() {
-        guard let data = try? Data(contentsOf: persistenceURL),
-              let decoded = try? JSONDecoder().decode([ClipboardEntry].self, from: data)
-        else { return }
+        guard let data = try? Data(contentsOf: persistenceURL) else { return }
+        guard let decoded = try? JSONDecoder().decode([ClipboardEntry].self, from: data) else {
+            // Keep a copy of the undecodable file before the next save overwrites it
+            try? data.write(to: persistenceURL.appendingPathExtension("bak"), options: .atomic)
+            return
+        }
         entries = decoded
     }
 }

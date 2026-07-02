@@ -3,6 +3,7 @@ import SwiftUI
 @main
 struct ItsypadApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var tabStore = TabStore.shared
     @StateObject private var settings = SettingsStore.shared
 
@@ -16,6 +17,11 @@ struct ItsypadApp: App {
                 .environmentObject(tabStore)
                 .environmentObject(settings)
                 .preferredColorScheme(colorScheme)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                CloudSyncEngine.shared.fetchChanges()
+            }
         }
     }
 

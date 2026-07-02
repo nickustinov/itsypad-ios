@@ -57,11 +57,17 @@ final class LineNumberGutterView: UIView {
 
         guard visibleCharRange.location != NSNotFound else { return }
 
-        // Count newlines before visible range to find starting line number
+        // Count lines before the visible range to find the starting number.
+        // lineRange(for:) walks per line without bridging the whole prefix to
+        // a Swift String, and counts \r / \r\n / U+2028 the same way the
+        // fragment enumeration below does.
+        // ponytail: O(text above viewport) per draw – cache line starts if
+        // scrolling huge documents ever measures slow.
         var lineNumber = 1
-        let prefix = text.substring(to: visibleCharRange.location)
-        for char in prefix {
-            if char == "\n" { lineNumber += 1 }
+        var scanIndex = 0
+        while scanIndex < visibleCharRange.location {
+            scanIndex = NSMaxRange(text.lineRange(for: NSRange(location: scanIndex, length: 0)))
+            if scanIndex <= visibleCharRange.location { lineNumber += 1 }
         }
 
         let attrs: [NSAttributedString.Key: Any] = [
@@ -89,8 +95,12 @@ final class LineNumberGutterView: UIView {
                 let numberString = "\(lineNumber)" as NSString
                 let size = numberString.size(withAttributes: attrs)
 
-                // Convert y from text view coordinates to gutter coordinates
-                let y = fragmentRect.origin.y + tv.textContainerInset.top - tv.contentOffset.y
+                // Let UIKit map text-content coordinates into gutter
+                // coordinates. Manual "- contentOffset" arithmetic silently
+                // assumes the two views share an origin and drifts whenever
+                // adjusted insets or intermediate views shift the text view.
+                let yInTextView = fragmentRect.origin.y + tv.textContainerInset.top
+                let y = tv.convert(CGPoint(x: 0, y: yInTextView), to: self).y
                 let x = gutterWidth - size.width - 8
 
                 // Align to text baseline using the editor font
@@ -110,17 +120,14 @@ final class LineNumberGutterView: UIView {
         let totalLength = text.length
         if totalLength > 0 && text.character(at: totalLength - 1) == 0x0A {
             let lastGlyphIndex = layoutManager.glyphIndexForCharacter(at: totalLength - 1)
-            var lastFragmentRect = CGRect.zero
-            layoutManager.lineFragmentRect(
-                forGlyphAt: lastGlyphIndex,
-                effectiveRange: nil,
-                withoutAdditionalLayout: true
-            )
-            lastFragmentRect = layoutManager.lineFragmentRect(
+            let lastFragmentRect = layoutManager.lineFragmentRect(
                 forGlyphAt: lastGlyphIndex,
                 effectiveRange: nil
             )
-            let extraLineY = lastFragmentRect.maxY + tv.textContainerInset.top - tv.contentOffset.y
+            let extraLineY = tv.convert(
+                CGPoint(x: 0, y: lastFragmentRect.maxY + tv.textContainerInset.top),
+                to: self
+            ).y
 
             if extraLineY < bounds.height {
                 let numberString = "\(lineNumber)" as NSString

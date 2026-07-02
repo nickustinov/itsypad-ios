@@ -118,6 +118,13 @@ class SettingsStore: ObservableObject {
         didSet {
             guard !isLoading else { return }
             defaults.set(lockRotation, forKey: "lockRotation")
+            // Re-evaluate supported orientations immediately – otherwise the
+            // toggle has no effect until iOS happens to query them again
+            for scene in UIApplication.shared.connectedScenes {
+                (scene as? UIWindowScene)?.windows.forEach {
+                    $0.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
+                }
+            }
         }
     }
 
@@ -126,7 +133,6 @@ class SettingsStore: ObservableObject {
     func setICloudSync(_ enabled: Bool) {
         icloudSync = enabled
         defaults.set(enabled, forKey: "icloudSync")
-        defaults.synchronize()
         if enabled {
             CloudSyncEngine.shared.start()
         } else {

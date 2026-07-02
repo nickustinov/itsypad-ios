@@ -17,6 +17,10 @@ struct CloudClipboardRecord {
     var timestamp: Date
 }
 
+/// All mutable state (recordMetadata, syncEngine, container) is confined to
+/// the main thread: the public API asserts main, and CKSyncEngine delegate
+/// callbacks hop to the main actor before touching anything. That confinement
+/// is what justifies `@unchecked Sendable` (required by CKSyncEngineDelegate).
 final class CloudSyncEngine: @unchecked Sendable {
     static let shared = CloudSyncEngine()
 
@@ -57,7 +61,7 @@ final class CloudSyncEngine: @unchecked Sendable {
 
     /// Call after app launch to start sync if the user has it enabled.
     func startIfEnabled() {
-        print("[CloudSync] startIfEnabled: icloudSync=\(SettingsStore.shared.icloudSync)")
+        logger.info("startIfEnabled: icloudSync=\(SettingsStore.shared.icloudSync)")
         if SettingsStore.shared.icloudSync {
             start()
         }
@@ -66,14 +70,15 @@ final class CloudSyncEngine: @unchecked Sendable {
     // MARK: - Public API
 
     func start() {
+        dispatchPrecondition(condition: .onQueue(.main))
         guard syncEngine == nil else {
-            print("[CloudSync] start: already running")
+            logger.info("start: already running")
             return
         }
 
         // CKContainer traps if CloudKit entitlement is missing (e.g. in unit tests)
         guard Self.hasCloudKitEntitlement else {
-            print("[CloudSync] start: no CloudKit entitlement")
+            logger.info("start: no CloudKit entitlement")
             return
         }
 
@@ -116,6 +121,7 @@ final class CloudSyncEngine: @unchecked Sendable {
     }
 
     func stop() {
+        dispatchPrecondition(condition: .onQueue(.main))
         syncEngine = nil
         recordMetadata.removeAll()
         saveRecordMetadata()
@@ -123,28 +129,31 @@ final class CloudSyncEngine: @unchecked Sendable {
     }
 
     func recordChanged(_ id: UUID) {
+        dispatchPrecondition(condition: .onQueue(.main))
         guard let engine = syncEngine else { return }
         let recordID = CKRecord.ID(recordName: id.uuidString, zoneID: zoneID)
         engine.state.add(pendingRecordZoneChanges: [.saveRecord(recordID)])
     }
 
     func fetchChanges() {
+        dispatchPrecondition(condition: .onQueue(.main))
         guard let engine = syncEngine else {
-            print("[CloudSync] fetchChanges: no syncEngine")
+            logger.info("fetchChanges: no syncEngine")
             return
         }
-        print("[CloudSync] fetchChanges: starting manual fetch")
+        logger.debug("fetchChanges: starting manual fetch")
         Task {
             do {
                 try await engine.fetchChanges()
-                print("[CloudSync] fetchChanges: completed")
+                self.logger.debug("fetchChanges: completed")
             } catch {
-                print("[CloudSync] fetchChanges: error \(error)")
+                self.logger.error("fetchChanges: \(error)")
             }
         }
     }
 
     func recordDeleted(_ id: UUID) {
+        dispatchPrecondition(condition: .onQueue(.main))
         guard let engine = syncEngine else { return }
         let recordID = CKRecord.ID(recordName: id.uuidString, zoneID: zoneID)
         engine.state.add(pendingRecordZoneChanges: [.deleteRecord(recordID)])
@@ -174,9 +183,23 @@ final class CloudSyncEngine: @unchecked Sendable {
         recordMetadata = decoded
     }
 
+    /// Debounced: the metadata dictionary can hold thousands of entries and is
+    /// touched once per record during a sync batch – encoding and writing the
+    /// whole file per record would dominate sync time. A crash inside the
+    /// debounce window only loses change tags, which the conflict handler
+    /// recovers on the next save.
+    private var metadataSaveWork: DispatchWorkItem?
+
     private func saveRecordMetadata() {
-        guard let data = try? JSONEncoder().encode(recordMetadata) else { return }
-        try? data.write(to: metadataURL, options: .atomic)
+        metadataSaveWork?.cancel()
+        let snapshot = recordMetadata
+        let url = metadataURL
+        let work = DispatchWorkItem {
+            guard let data = try? JSONEncoder().encode(snapshot) else { return }
+            try? data.write(to: url, options: .atomic)
+        }
+        metadataSaveWork = work
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.5, execute: work)
     }
 
     private func cacheRecordSystemFields(_ record: CKRecord) {
@@ -227,11 +250,10 @@ final class CloudSyncEngine: @unchecked Sendable {
     // MARK: - Incoming changes
 
     private func applyFetchedChanges(_ event: CKSyncEngine.Event.FetchedRecordZoneChanges) {
-        print("[CloudSync] applyFetchedChanges: \(event.modifications.count) modifications, \(event.deletions.count) deletions")
+        logger.debug("applyFetchedChanges: \(event.modifications.count) modifications, \(event.deletions.count) deletions")
         for modification in event.modifications {
             let record = modification.record
-            print("[CloudSync] modification: type=\(record.recordType) id=\(record.recordID.recordName.prefix(8))")
-            cacheRecordSystemFields(record)
+                        cacheRecordSystemFields(record)
 
             switch record.recordType {
             case RecordType.scratchTab.rawValue:
@@ -251,13 +273,9 @@ final class CloudSyncEngine: @unchecked Sendable {
 
             switch deletion.recordType {
             case RecordType.scratchTab.rawValue:
-                DispatchQueue.main.async {
-                    TabStore.shared.removeCloudTab(id: uuid)
-                }
+                TabStore.shared.removeCloudTab(id: uuid)
             case RecordType.clipboardEntry.rawValue:
-                DispatchQueue.main.async {
-                    ClipboardStore.shared.removeCloudClipboardEntry(id: uuid)
-                }
+                ClipboardStore.shared.removeCloudClipboardEntry(id: uuid)
             default:
                 break
             }
@@ -283,10 +301,8 @@ final class CloudSyncEngine: @unchecked Sendable {
             languageLocked: languageLocked,
             lastModified: lastModified
         )
-        print("[CloudSync] applyTab: id=\(uuid.uuidString.prefix(8)) name=\(name)")
-        DispatchQueue.main.async {
-            TabStore.shared.applyCloudTab(tabRecord)
-        }
+        logger.debug("applyTab: id=\(uuid.uuidString.prefix(8))")
+        TabStore.shared.applyCloudTab(tabRecord)
     }
 
     private func applyClipboardEntryRecord(_ record: CKRecord) {
@@ -297,31 +313,35 @@ final class CloudSyncEngine: @unchecked Sendable {
         }
         guard let uuid = UUID(uuidString: record.recordID.recordName) else { return }
 
-        print("[CloudSync] applyClipboardEntry: id=\(uuid.uuidString.prefix(8)) text=\(text.prefix(40))")
+        logger.debug("applyClipboardEntry: id=\(uuid.uuidString.prefix(8))")
         let clipboardRecord = CloudClipboardRecord(id: uuid, text: text, timestamp: timestamp)
-        DispatchQueue.main.async {
-            ClipboardStore.shared.applyCloudClipboardEntry(clipboardRecord)
-        }
+        ClipboardStore.shared.applyCloudClipboardEntry(clipboardRecord)
     }
 
     // MARK: - Conflict resolution
 
-    private func resolveTabConflict(local record: CKRecord, server serverRecord: CKRecord) {
+    /// Returns true when the local version won and must be re-uploaded.
+    /// When the server wins, the record must NOT be re-queued: the server
+    /// content is applied locally, and re-saving would push the stale local
+    /// copy back up with a fresh change tag, reverting the newer server edit.
+    private func resolveTabConflict(local record: CKRecord, server serverRecord: CKRecord) -> Bool {
         let localModified = record["lastModified"] as? Date ?? .distantPast
         let serverModified = serverRecord["lastModified"] as? Date ?? .distantPast
 
         if localModified > serverModified {
-            // Local wins: copy local fields onto server record and re-push
+            // Local wins: adopt the server's change tag and re-push local fields
             serverRecord["name"] = record["name"]
             serverRecord["content"] = record["content"]
             serverRecord["language"] = record["language"]
             serverRecord["languageLocked"] = record["languageLocked"]
             serverRecord["lastModified"] = record["lastModified"]
             cacheRecordSystemFields(serverRecord)
+            return true
         } else {
             // Server wins: accept server version
             cacheRecordSystemFields(serverRecord)
             applyScratchTabRecord(serverRecord)
+            return false
         }
     }
 
@@ -337,53 +357,43 @@ final class CloudSyncEngine: @unchecked Sendable {
 extension CloudSyncEngine: CKSyncEngineDelegate {
 
     func handleEvent(_ event: CKSyncEngine.Event, syncEngine: CKSyncEngine) async {
+        await MainActor.run {
+            processEvent(event, syncEngine: syncEngine)
+        }
+    }
+
+    @MainActor
+    private func processEvent(_ event: CKSyncEngine.Event, syncEngine: CKSyncEngine) {
         switch event {
         case .stateUpdate(let stateUpdate):
-            print("[CloudSync] event: stateUpdate")
             saveStateSerialization(stateUpdate.stateSerialization)
 
         case .accountChange(let accountChange):
-            print("[CloudSync] event: accountChange")
             handleAccountChange(accountChange)
 
         case .fetchedDatabaseChanges(let event):
-            print("[CloudSync] event: fetchedDatabaseChanges")
             handleFetchedDatabaseChanges(event)
 
         case .fetchedRecordZoneChanges(let event):
-            print("[CloudSync] event: fetchedRecordZoneChanges – \(event.modifications.count) mods, \(event.deletions.count) dels")
             applyFetchedChanges(event)
 
         case .sentRecordZoneChanges(let event):
-            print("[CloudSync] event: sentRecordZoneChanges – \(event.savedRecords.count) saved, \(event.failedRecordSaves.count) failed")
             handleSentRecordZoneChanges(event)
 
         case .sentDatabaseChanges(let event):
-            print("[CloudSync] event: sentDatabaseChanges – \(event.failedZoneSaves.count) failed zones")
             for failedZone in event.failedZoneSaves {
                 logger.error("Failed zone save: code=\(failedZone.error.code.rawValue) \(failedZone.error.localizedDescription)")
             }
 
         case .didFetchChanges:
-            print("[CloudSync] event: didFetchChanges")
-            DispatchQueue.main.async {
-                TabStore.shared.lastICloudSync = Date()
-            }
+            TabStore.shared.lastICloudSync = Date()
 
         case .didSendChanges:
-            print("[CloudSync] event: didSendChanges")
-            DispatchQueue.main.async {
-                TabStore.shared.lastICloudSync = Date()
-            }
+            TabStore.shared.lastICloudSync = Date()
 
-        case .willFetchChanges:
-            print("[CloudSync] event: willFetchChanges")
-        case .willSendChanges:
-            print("[CloudSync] event: willSendChanges")
-        case .willFetchRecordZoneChanges:
-            print("[CloudSync] event: willFetchRecordZoneChanges")
-        case .didFetchRecordZoneChanges:
-            print("[CloudSync] event: didFetchRecordZoneChanges")
+        case .willFetchChanges, .willSendChanges,
+             .willFetchRecordZoneChanges, .didFetchRecordZoneChanges:
+            break
 
         @unknown default:
             break
@@ -397,16 +407,25 @@ extension CloudSyncEngine: CKSyncEngineDelegate {
         let scope = context.options.scope
         let changes = syncEngine.state.pendingRecordZoneChanges.filter { scope.contains($0) }
 
+        // Snapshot record content on the main actor – TabStore/ClipboardStore
+        // and recordMetadata are main-thread state
+        let records: [CKRecord.ID: CKRecord] = await MainActor.run {
+            var map = [CKRecord.ID: CKRecord]()
+            for change in changes {
+                guard case .saveRecord(let recordID) = change,
+                      let uuid = UUID(uuidString: recordID.recordName) else { continue }
+                if let record = buildScratchTabRecord(id: uuid, recordID: recordID)
+                    ?? buildClipboardEntryRecord(id: uuid, recordID: recordID) {
+                    map[recordID] = record
+                }
+            }
+            return map
+        }
+
         let batch = await CKSyncEngine.RecordZoneChangeBatch(pendingChanges: changes) { recordID in
-            guard let uuid = UUID(uuidString: recordID.recordName) else { return nil }
-
-            if let record = self.buildScratchTabRecord(id: uuid, recordID: recordID) {
+            if let record = records[recordID] {
                 return record
             }
-            if let record = self.buildClipboardEntryRecord(id: uuid, recordID: recordID) {
-                return record
-            }
-
             // Record no longer exists locally; remove from pending
             syncEngine.state.remove(pendingRecordZoneChanges: [.saveRecord(recordID)])
             return nil
@@ -459,13 +478,15 @@ extension CloudSyncEngine: CKSyncEngineDelegate {
 
                 switch failedRecord.recordType {
                 case RecordType.scratchTab.rawValue:
-                    resolveTabConflict(local: failedRecord, server: serverRecord)
+                    if resolveTabConflict(local: failedRecord, server: serverRecord) {
+                        newPendingRecordZoneChanges.append(.saveRecord(failedRecord.recordID))
+                    }
                 case RecordType.clipboardEntry.rawValue:
+                    // Server wins, entries are immutable – nothing to re-push
                     resolveClipboardConflict(local: failedRecord, server: serverRecord)
                 default:
                     break
                 }
-                newPendingRecordZoneChanges.append(.saveRecord(failedRecord.recordID))
 
             case .zoneNotFound:
                 let zone = CKRecordZone(zoneID: failedRecord.recordID.zoneID)

@@ -274,6 +274,15 @@ final class ListHelperTests: XCTestCase {
         XCTAssertEqual(result?.newText, "second\nfirst")
     }
 
+    func testSwapLinesDownPastEmojiLineUsesUTF16Offsets() {
+        let text = "aa\n🥛🥛\nbb"
+        let lineRange = NSRange(location: 0, length: 3) // "aa\n"
+        let result = ListHelper.swapLines(text, lineRange: lineRange, direction: .down)
+        XCTAssertEqual(result?.newText, "🥛🥛\naa\nbb")
+        // "🥛🥛\n" is 5 UTF-16 units – the moved line must start after it
+        XCTAssertEqual(result?.newSelection, NSRange(location: 5, length: 3))
+    }
+
     func testSwapLinesCursorFollows() {
         let text = "line one\nline two\nline three"
         let lineRange = NSRange(location: 0, length: 9) // "line one\n"

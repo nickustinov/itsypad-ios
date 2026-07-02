@@ -1,8 +1,15 @@
 import UIKit
 
 final class EditorTextView: UITextView {
+    /// Owns the manually built TextKit 1 text storage. NSLayoutManager only
+    /// references its storage unowned, so without a strong owner the storage
+    /// deallocates and the view crashes on first layout.
+    var ownedTextStorage: NSTextStorage?
+
     var onTextChange: ((String) -> Void)?
     var onCursorChange: ((Int) -> Void)?
+    var onEdgeSwipe: ((Int) -> Void)? // -1 = previous tab, +1 = next tab
+    private(set) var edgeGestures: [UIScreenEdgePanGestureRecognizer] = []
 
     var wrapsLines: Bool = true {
         didSet {
@@ -50,12 +57,10 @@ final class EditorTextView: UITextView {
     }
 
     private func commonInit() {
-        autocorrectionType = .no
-        autocapitalizationType = .none
+        applyKeyboardTraits(forLanguage: "plain")
         smartQuotesType = .no
         smartDashesType = .no
         smartInsertDeleteType = .no
-        spellCheckingType = .no
         keyboardDismissMode = .interactive
         alwaysBounceVertical = true
         textContainerInset = UIEdgeInsets(top: 12, left: 8, bottom: 12, right: 8)
@@ -68,6 +73,17 @@ final class EditorTextView: UITextView {
         let swipeLeft = UISwipeGestureRecognizer(target: self, action: #selector(handleSwipeOutdent(_:)))
         swipeLeft.direction = .left
         addGestureRecognizer(swipeLeft)
+
+        // Edge swipes switch tabs; indent/outdent swipes and scrolling defer to them
+        for edge in [UIRectEdge.left, .right] {
+            let edgePan = UIScreenEdgePanGestureRecognizer(target: self, action: #selector(handleEdgePan(_:)))
+            edgePan.edges = edge
+            addGestureRecognizer(edgePan)
+            edgeGestures.append(edgePan)
+            swipeRight.require(toFail: edgePan)
+            swipeLeft.require(toFail: edgePan)
+            panGestureRecognizer.require(toFail: edgePan)
+        }
 
         NotificationCenter.default.addObserver(
             self, selector: #selector(keyboardWillChangeFrame(_:)),
@@ -83,34 +99,120 @@ final class EditorTextView: UITextView {
         NotificationCenter.default.removeObserver(self)
     }
 
+    // MARK: - Undo-safe programmatic edits
+
+    /// Replace text through the UITextInput system so the edit is registered
+    /// with the undo manager. Direct textStorage mutation shifts text under
+    /// previously registered undo operations, making undo delete the wrong
+    /// characters or crash.
+    func replaceTextPreservingUndo(in range: NSRange, with string: String) {
+        guard let start = position(from: beginningOfDocument, offset: range.location),
+              let end = position(from: start, offset: range.length),
+              let textRange = textRange(from: start, to: end) else {
+            textStorage.replaceCharacters(in: range, with: string)
+            return
+        }
+        replace(textRange, withText: string)
+    }
+
+    // MARK: - Keyboard traits
+
+    func applyKeyboardTraits(forLanguage language: String) {
+        let prose = language == "plain" || language == "markdown"
+        autocapitalizationType = prose ? .sentences : .none
+        autocorrectionType = prose ? .default : .no
+        spellCheckingType = prose ? .default : .no
+        if isFirstResponder {
+            reloadInputViews()
+        }
+    }
+
     // MARK: - Foreground restore
 
+    /// True once the app has completed its first activation. The isEditable
+    /// cycle below is only needed after RETURNING from background – running it
+    /// during cold launch interrupts the initial keyboard presentation: UIKit
+    /// posts a keyboard-hide frame (zeroing the avoidance inset) and may skip
+    /// the re-show notification when the keyboard never visually moved,
+    /// leaving content stuck under the keyboard.
+    private static var hasCompletedInitialActivation = false
+
     @objc private func appDidBecomeActive() {
+        guard Self.hasCompletedInitialActivation else {
+            Self.hasCompletedInitialActivation = true
+            return
+        }
         guard window != nil else { return }
         // Cycle isEditable to reset UITextInteraction gesture recognizers
         // that can get stuck after the app returns from background.
+        // The cycle ends the editing session, so restore first responder –
+        // otherwise the keyboard stays dismissed until the user taps around.
+        let wasFirstResponder = isFirstResponder
         isEditable = false
         isEditable = true
+        if wasFirstResponder {
+            becomeFirstResponder()
+        }
     }
 
     // MARK: - Keyboard avoidance
 
-    @objc private func keyboardWillChangeFrame(_ notification: Notification) {
-        guard let window = self.window,
-              let endFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
+    /// Last known keyboard frame, shared across all editor text views. Cached
+    /// per-tab text views are usually NOT in the window when the keyboard
+    /// notification fires, so they must re-apply the overlap when they join
+    /// the window (tab switch with the keyboard open) – see didMoveToWindow.
+    private static var lastKeyboardFrame: CGRect = .zero
 
-        let viewFrame = convert(bounds, to: window)
-        let overlap = max(viewFrame.maxY - endFrame.minY, 0)
+    @objc private func keyboardWillChangeFrame(_ notification: Notification) {
+        guard let endFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
+        Self.lastKeyboardFrame = endFrame
+
+        guard window != nil else { return }
 
         let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0.25
         let curveRaw = notification.userInfo?[UIResponder.keyboardAnimationCurveUserInfoKey] as? UInt ?? 7
         let options = UIView.AnimationOptions(rawValue: curveRaw << 16)
 
         UIView.animate(withDuration: duration, delay: 0, options: options) {
-            self.contentInset.bottom = overlap
-            self.verticalScrollIndicatorInsets.bottom = overlap
+            self.applyKeyboardOverlap(endFrame)
         } completion: { _ in
-            if overlap > 0 {
+            if self.contentInset.bottom > 0 {
+                self.scrollRangeToVisible(self.selectedRange)
+            }
+        }
+    }
+
+    /// Internal (not private) so tests can exercise the geometry directly –
+    /// notification-driven tests race the host app's real keyboard.
+    func applyKeyboardOverlap(_ keyboardFrame: CGRect) {
+        guard let window = self.window else { return }
+        let viewFrame = convert(bounds, to: window)
+        // Rounded with a tolerance: convert() carries float noise that would
+        // otherwise read as a change and trigger redundant inset writes.
+        let overlap = max(viewFrame.maxY - keyboardFrame.minY, 0).rounded()
+        if abs(contentInset.bottom - overlap) >= 1 {
+            contentInset.bottom = overlap
+            verticalScrollIndicatorInsets.bottom = overlap
+        }
+    }
+
+    override func adjustedContentInsetDidChange() {
+        super.adjustedContentInsetDidChange()
+        // Safe-area/inset adjustments move the text's rest position without
+        // necessarily firing scrollViewDidScroll – redraw the gutter so the
+        // line numbers follow
+        (delegate as? EditorCoordinator)?.gutterView?.setNeedsDisplay()
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        guard window != nil, Self.lastKeyboardFrame != .zero else { return }
+        // Defer to the next runloop turn: at attach time this view's frames
+        // are stale/zero, so the overlap must be computed after layout settles
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.window != nil else { return }
+            self.applyKeyboardOverlap(Self.lastKeyboardFrame)
+            if self.contentInset.bottom > 0 {
                 self.scrollRangeToVisible(self.selectedRange)
             }
         }
@@ -196,6 +298,32 @@ final class EditorTextView: UITextView {
 
     // MARK: - Checkbox tap detection
 
+    /// Separate delegate object: the text view must NOT be the gesture
+    /// delegate itself – UIScrollView is already the private delegate of its
+    /// internal gestures, and overriding shouldRecognizeSimultaneously on the
+    /// view hijacks the system's gesture arbitration (breaks tap-to-place-
+    /// cursor and scrolling).
+    private final class TapCoexistenceDelegate: NSObject, UIGestureRecognizerDelegate {
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            true
+        }
+    }
+
+    private let tapDelegate = TapCoexistenceDelegate()
+
+    func installTapHandling() {
+        let tap = UITapGestureRecognizer(target: self, action: #selector(handleTapGesture(_:)))
+        tap.delegate = tapDelegate
+        addGestureRecognizer(tap)
+    }
+
+    @objc private func handleTapGesture(_ gesture: UITapGestureRecognizer) {
+        _ = handleTap(at: gesture.location(in: self))
+    }
+
     func handleTap(at point: CGPoint) -> Bool {
         if handleLinkTap(at: point) {
             return true
@@ -253,8 +381,8 @@ final class EditorTextView: UITextView {
         guard charIndex >= bracketStart && charIndex < bracketEnd else { return false }
 
         let toggled = ListHelper.toggleCheckbox(in: cleanLine)
-        let replaceRange = NSRange(location: lineRange.location, length: cleanLine.count)
-        textStorage.replaceCharacters(in: replaceRange, with: toggled)
+        let replaceRange = NSRange(location: lineRange.location, length: cleanLine.utf16.count)
+        replaceTextPreservingUndo(in: replaceRange, with: toggled)
         delegate?.textViewDidChange?(self)
         return true
     }
@@ -277,8 +405,8 @@ final class EditorTextView: UITextView {
             insertion = "\n" + lineText
         }
 
-        textStorage.replaceCharacters(in: NSRange(location: insertAt, length: 0), with: insertion)
-        selectedRange = NSRange(location: sel.location + insertion.count, length: sel.length)
+        replaceTextPreservingUndo(in: NSRange(location: insertAt, length: 0), with: insertion)
+        selectedRange = NSRange(location: sel.location + insertion.utf16.count, length: sel.length)
         delegate?.textViewDidChange?(self)
     }
 
@@ -292,9 +420,9 @@ final class EditorTextView: UITextView {
         let toggled = ListHelper.toggleCheckbox(in: cleanLine)
         guard toggled != cleanLine else { return }
 
-        let replaceRange = NSRange(location: lineRange.location, length: cleanLine.count)
-        textStorage.replaceCharacters(in: replaceRange, with: toggled)
-        let safeLoc = min(sel.location, lineRange.location + toggled.count)
+        let replaceRange = NSRange(location: lineRange.location, length: cleanLine.utf16.count)
+        replaceTextPreservingUndo(in: replaceRange, with: toggled)
+        let safeLoc = min(sel.location, lineRange.location + toggled.utf16.count)
         selectedRange = NSRange(location: safeLoc, length: 0)
         delegate?.textViewDidChange?(self)
     }
@@ -332,15 +460,15 @@ final class EditorTextView: UITextView {
         var newText = newLines.joined(separator: "\n")
         if endsWithNewline { newText += "\n" }
 
-        textStorage.replaceCharacters(in: lineRange, with: newText)
+        replaceTextPreservingUndo(in: lineRange, with: newText)
 
         if sel.length == 0, newLines.count == 1 {
             let oldLine = endsWithNewline ? String(blockText.dropLast()) : blockText
-            let delta = newLines[0].count - oldLine.count
+            let delta = newLines[0].utf16.count - oldLine.utf16.count
             let newCursor = max(lineRange.location, sel.location + delta)
-            selectedRange = NSRange(location: min(newCursor, lineRange.location + newLines[0].count), length: 0)
+            selectedRange = NSRange(location: min(newCursor, lineRange.location + newLines[0].utf16.count), length: 0)
         } else {
-            selectedRange = NSRange(location: lineRange.location, length: newText.count - (endsWithNewline ? 1 : 0))
+            selectedRange = NSRange(location: lineRange.location, length: newText.utf16.count - (endsWithNewline ? 1 : 0))
         }
 
         delegate?.textViewDidChange?(self)
@@ -368,6 +496,15 @@ final class EditorTextView: UITextView {
     @objc private func handleShiftTab() {
         guard let coordinator = delegate as? EditorCoordinator else { return }
         coordinator.outdentLines(tv: self)
+    }
+
+    // MARK: - Edge swipe tab switching
+
+    @objc private func handleEdgePan(_ gesture: UIScreenEdgePanGestureRecognizer) {
+        guard gesture.state == .ended else { return }
+        // Require a deliberate horizontal drag to avoid accidental switches
+        guard abs(gesture.translation(in: self).x) > 40 else { return }
+        onEdgeSwipe?(gesture.edges == .left ? -1 : 1)
     }
 
     // MARK: - Swipe indent/outdent

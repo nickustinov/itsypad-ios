@@ -4,7 +4,10 @@ class EditorCoordinator: NSObject, UITextViewDelegate {
     weak var textView: EditorTextView?
     var language: String = "plain" {
         didSet {
-            if language != oldValue { scheduleHighlightIfNeeded() }
+            if language != oldValue {
+                scheduleHighlightIfNeeded()
+                textView?.applyKeyboardTraits(forLanguage: language)
+            }
         }
     }
     var font: UIFont = .monospacedSystemFont(ofSize: 16, weight: .regular)
@@ -17,6 +20,7 @@ class EditorCoordinator: NSObject, UITextViewDelegate {
     private(set) var themeIsDark: Bool = EditorTheme.current(for: SettingsStore.shared.appearanceOverride).isDark
 
     private var pendingHighlight: DispatchWorkItem?
+    private var highlightGeneration = 0
     private var lastHighlightedText: String = ""
     private var lastLanguage: String?
     private var lastAppearance: String?
@@ -117,6 +121,9 @@ class EditorCoordinator: NSObject, UITextViewDelegate {
         let themeName = SyntaxThemeRegistry.cssResource(for: themeId, isDark: isDark)
         let currentFont = font
 
+        // Cancel any queued highlight so this sync hop only ever waits for a
+        // job that is already mid-flight, not a whole backlog.
+        pendingHighlight?.cancel()
         Self.highlightQueue.sync {
             _ = Self.highlightJS.loadTheme(named: themeName)
             Self.highlightJS.setCodeFont(currentFont)
@@ -174,14 +181,20 @@ class EditorCoordinator: NSObject, UITextViewDelegate {
 
         let highlightJS = Self.highlightJS
 
-        var work: DispatchWorkItem!
-        work = DispatchWorkItem { [weak self] in
-            guard let self, !work.isCancelled else { return }
+        // Generation counter instead of checking work.isCancelled inside the
+        // block: a work item whose closure references the item itself is a
+        // permanent retain cycle that leaks the item plus its full-document
+        // text snapshot on every keystroke.
+        highlightGeneration &+= 1
+        let generation = highlightGeneration
+
+        let work = DispatchWorkItem { [weak self] in
+            guard self != nil else { return }
             highlightJS.setCodeFont(userFont)
             let highlighted = highlightJS.highlight(textSnapshot, as: hlLang)
 
             DispatchQueue.main.async { [weak self] in
-                guard let self, !work.isCancelled, let tv = self.textView else { return }
+                guard let self, self.highlightGeneration == generation, let tv = self.textView else { return }
                 guard tv.text == textSnapshot else { return }
 
                 let ns = textSnapshot as NSString
@@ -217,7 +230,13 @@ class EditorCoordinator: NSObject, UITextViewDelegate {
 
                 let safeLocation = min(sel.location, ns.length)
                 let safeLength = min(sel.length, ns.length - safeLocation)
-                tv.selectedRange = NSRange(location: safeLocation, length: safeLength)
+                let safeRange = NSRange(location: safeLocation, length: safeLength)
+                // Only touch the selection when clamping actually changed it –
+                // reassigning fires textViewDidChangeSelection, which scrolls
+                // to the caret and yanks the view back while the user scrolls
+                if tv.selectedRange != safeRange {
+                    tv.selectedRange = safeRange
+                }
 
                 self.lastHighlightedText = textSnapshot
                 self.lastLanguage = self.language
@@ -249,7 +268,10 @@ class EditorCoordinator: NSObject, UITextViewDelegate {
 
         let safeLocation = min(sel.location, ns.length)
         let safeLength = min(sel.length, ns.length - safeLocation)
-        tv.selectedRange = NSRange(location: safeLocation, length: safeLength)
+        let safeRange = NSRange(location: safeLocation, length: safeLength)
+        if tv.selectedRange != safeRange {
+            tv.selectedRange = safeRange
+        }
 
         lastHighlightedText = text
         lastLanguage = language
@@ -462,14 +484,14 @@ class EditorCoordinator: NSObject, UITextViewDelegate {
             let listsAllowed = language == "plain" || language == "markdown"
             if listsAllowed, let match = ListHelper.parseLine(currentLine), ListHelper.isKindEnabled(match.kind) {
                 if ListHelper.isEmptyItem(currentLine, match: match) {
-                    let prefixRange = NSRange(location: lineRange.location, length: currentLine.count)
-                    tv.textStorage.replaceCharacters(in: prefixRange, with: "")
+                    let prefixRange = NSRange(location: lineRange.location, length: currentLine.utf16.count)
+                    tv.replaceTextPreservingUndo(in: prefixRange, with: "")
                     tv.selectedRange = NSRange(location: lineRange.location, length: 0)
                     self.textViewDidChange(tv)
                     return false
                 } else {
                     let next = ListHelper.nextPrefix(for: match)
-                    tv.textStorage.replaceCharacters(in: range, with: "\n" + next)
+                    tv.replaceTextPreservingUndo(in: range, with: "\n" + next)
                     tv.selectedRange = NSRange(location: range.location + 1 + next.count, length: 0)
                     self.textViewDidChange(tv)
                     return false
@@ -479,7 +501,7 @@ class EditorCoordinator: NSObject, UITextViewDelegate {
             // Auto-indent
             let indent = currentLine.prefix { $0 == " " || $0 == "\t" }
             if !indent.isEmpty {
-                tv.textStorage.replaceCharacters(in: range, with: "\n" + indent)
+                tv.replaceTextPreservingUndo(in: range, with: "\n" + indent)
                 tv.selectedRange = NSRange(location: range.location + 1 + indent.count, length: 0)
                 self.textViewDidChange(tv)
                 return false
@@ -508,11 +530,11 @@ class EditorCoordinator: NSObject, UITextViewDelegate {
                     let prefixLen = listMatch.indent.count + numStr.count
                     let replaceRange = NSRange(location: lineRange.location, length: prefixLen)
                     let replacement = listMatch.indent + indent + "1"
-                    tv.textStorage.replaceCharacters(in: replaceRange, with: replacement)
+                    tv.replaceTextPreservingUndo(in: replaceRange, with: replacement)
                     tv.selectedRange = NSRange(location: sel.location + replacement.count - prefixLen, length: 0)
                 } else {
                     let insertRange = NSRange(location: lineRange.location, length: 0)
-                    tv.textStorage.replaceCharacters(in: insertRange, with: indent)
+                    tv.replaceTextPreservingUndo(in: insertRange, with: indent)
                     tv.selectedRange = NSRange(location: sel.location + indent.count, length: 0)
                 }
                 self.textViewDidChange(tv)
@@ -522,7 +544,7 @@ class EditorCoordinator: NSObject, UITextViewDelegate {
             let store = SettingsStore.shared
             if store.indentUsingSpaces {
                 let spaces = String(repeating: " ", count: store.tabWidth)
-                tv.textStorage.replaceCharacters(in: range, with: spaces)
+                tv.replaceTextPreservingUndo(in: range, with: spaces)
                 tv.selectedRange = NSRange(location: range.location + spaces.count, length: 0)
                 self.textViewDidChange(tv)
                 return false
@@ -542,7 +564,7 @@ class EditorCoordinator: NSObject, UITextViewDelegate {
             if listsAllowed, let match = ListHelper.parseLine(cleanLine), ListHelper.isKindEnabled(match.kind),
                cursorOffset == match.contentStart {
                 let prefixRange = NSRange(location: lineRange.location, length: match.contentStart)
-                tv.textStorage.replaceCharacters(in: prefixRange, with: match.indent)
+                tv.replaceTextPreservingUndo(in: prefixRange, with: match.indent)
                 tv.selectedRange = NSRange(location: lineRange.location + match.indent.count, length: 0)
                 self.textViewDidChange(tv)
                 return false
@@ -567,8 +589,8 @@ class EditorCoordinator: NSObject, UITextViewDelegate {
             newText = String(newText.dropLast())
         }
 
-        tv.textStorage.replaceCharacters(in: lineRange, with: newText)
-        tv.selectedRange = NSRange(location: lineRange.location, length: newText.count)
+        tv.replaceTextPreservingUndo(in: lineRange, with: newText)
+        tv.selectedRange = NSRange(location: lineRange.location, length: newText.utf16.count)
         self.textViewDidChange(tv)
     }
 
@@ -587,9 +609,9 @@ class EditorCoordinator: NSObject, UITextViewDelegate {
             newText = String(newText.dropLast())
         }
 
-        tv.textStorage.replaceCharacters(in: lineRange, with: newText)
+        tv.replaceTextPreservingUndo(in: lineRange, with: newText)
         if sel.length > 0 {
-            tv.selectedRange = NSRange(location: lineRange.location, length: newText.count)
+            tv.selectedRange = NSRange(location: lineRange.location, length: newText.utf16.count)
         } else {
             tv.selectedRange = NSRange(location: sel.location + indent.count, length: 0)
         }
@@ -633,9 +655,9 @@ class EditorCoordinator: NSObject, UITextViewDelegate {
         var newText = newLines.joined(separator: "\n")
         if endsWithNewline { newText += "\n" }
 
-        tv.textStorage.replaceCharacters(in: lineRange, with: newText)
+        tv.replaceTextPreservingUndo(in: lineRange, with: newText)
         if sel.length > 0 {
-            tv.selectedRange = NSRange(location: lineRange.location, length: newText.count - (endsWithNewline ? 1 : 0))
+            tv.selectedRange = NSRange(location: lineRange.location, length: newText.utf16.count - (endsWithNewline ? 1 : 0))
         } else {
             let newLoc = max(lineRange.location, sel.location - firstLineRemoved)
             tv.selectedRange = NSRange(location: newLoc, length: 0)

@@ -129,6 +129,15 @@ struct TabGridView: View {
                 pendingCloseTabID = nil
                 closeAfterSaveAs = false
             }
+            .onChange(of: showSaveAsExporter) { _, isShown in
+                // fileExporter does not invoke onCompletion when the user
+                // cancels – clear the pending close state so a later save
+                // can't act on a stale tab id
+                if !isShown {
+                    pendingCloseTabID = nil
+                    closeAfterSaveAs = false
+                }
+            }
         }
     }
 

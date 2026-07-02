@@ -191,6 +191,9 @@ class HighlightJS {
                 // Skip 'span class="'
                 let prefix = Array("span class=\"".utf16)
                 i += prefix.count
+                // Truncated tag at end of input – bail out instead of slicing
+                // past the buffer below
+                if i >= count { break }
                 // Scan class value until '">'
                 let classStart = i
                 while i < count - 1 && !(chars[i] == 0x22 && chars[i + 1] == 0x3E) { i += 1 } // '">'

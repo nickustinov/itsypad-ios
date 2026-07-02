@@ -41,6 +41,21 @@ final class TabStoreTests: XCTestCase {
         XCTAssertEqual(restored.tabs.first?.language, "plain")
     }
 
+    // MARK: - Corrupt session backup
+
+    func testCorruptSessionFileIsBackedUpBeforeOverwrite() {
+        let garbage = Data("not json at all {{{".utf8)
+        try! garbage.write(to: tempURL)
+
+        let restored = TabStore(sessionURL: tempURL)
+        let backupURL = tempURL.appendingPathExtension("bak")
+        defer { try? FileManager.default.removeItem(at: backupURL) }
+
+        XCTAssertEqual(try? Data(contentsOf: backupURL), garbage)
+        // Store still recovers with a fresh tab
+        XCTAssertEqual(restored.tabs.count, 1)
+    }
+
     // MARK: - addNewTab
 
     func testAddNewTab() {
@@ -54,6 +69,78 @@ final class TabStoreTests: XCTestCase {
         store.addNewTab()
         let newTab = store.tabs.last!
         XCTAssertEqual(store.selectedTabID, newTab.id)
+    }
+
+    // MARK: - selectNeighborTab
+
+    func testSelectNeighborTabNext() {
+        store.addNewTab()
+        store.addNewTab()
+        store.selectedTabID = store.tabs[0].id
+
+        store.selectNeighborTab(delta: 1)
+        XCTAssertEqual(store.selectedTabID, store.tabs[1].id)
+    }
+
+    func testSelectNeighborTabPrevious() {
+        store.addNewTab()
+        store.selectedTabID = store.tabs[1].id
+
+        store.selectNeighborTab(delta: -1)
+        XCTAssertEqual(store.selectedTabID, store.tabs[0].id)
+    }
+
+    func testSelectNeighborTabStopsAtFirst() {
+        store.addNewTab()
+        store.selectedTabID = store.tabs[0].id
+
+        store.selectNeighborTab(delta: -1)
+        XCTAssertEqual(store.selectedTabID, store.tabs[0].id)
+    }
+
+    func testSelectNeighborTabStopsAtLast() {
+        store.addNewTab()
+        store.selectedTabID = store.tabs.last!.id
+
+        store.selectNeighborTab(delta: 1)
+        XCTAssertEqual(store.selectedTabID, store.tabs.last!.id)
+    }
+
+    // MARK: - removeCloudTab
+
+    func testRemoveCloudTabReassignsSelectionWhenSelectedTabDeleted() {
+        store.addNewTab()
+        store.addNewTab()
+        let deleted = store.tabs[1]
+        store.selectedTabID = deleted.id
+
+        store.removeCloudTab(id: deleted.id)
+
+        XCTAssertFalse(store.tabs.contains { $0.id == deleted.id })
+        XCTAssertNotNil(store.selectedTabID)
+        XCTAssertTrue(store.tabs.contains { $0.id == store.selectedTabID })
+    }
+
+    func testRemoveCloudTabKeepsSelectionWhenOtherTabDeleted() {
+        store.addNewTab()
+        let selected = store.tabs[0]
+        let deleted = store.tabs[1]
+        store.selectedTabID = selected.id
+
+        store.removeCloudTab(id: deleted.id)
+
+        XCTAssertEqual(store.selectedTabID, selected.id)
+    }
+
+    func testRemoveCloudTabLastTabCreatesNewTab() {
+        let only = store.tabs[0]
+        store.selectedTabID = only.id
+
+        store.removeCloudTab(id: only.id)
+
+        XCTAssertEqual(store.tabs.count, 1)
+        XCTAssertNotEqual(store.tabs[0].id, only.id)
+        XCTAssertEqual(store.selectedTabID, store.tabs[0].id)
     }
 
     // MARK: - closeTab

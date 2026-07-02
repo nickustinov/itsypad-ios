@@ -235,7 +235,7 @@ enum ListHelper {
             if !text.hasSuffix("\n") && result.hasSuffix("\n") {
                 result = String(result.dropLast())
             }
-            let newLocation = lineRange.location + nextLine.count
+            let newLocation = lineRange.location + nextLine.utf16.count
             return (result, NSRange(location: newLocation, length: lineRange.length))
 
         case .up:

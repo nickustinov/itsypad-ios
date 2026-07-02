@@ -60,8 +60,8 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.nickustinov.itsypad
         PRODUCT_NAME: Itsypad
         PRODUCT_MODULE_NAME: ItsypadCore
-        MARKETING_VERSION: "1.1.0"
-        CURRENT_PROJECT_VERSION: "110"
+        MARKETING_VERSION: "1.2.0"
+        CURRENT_PROJECT_VERSION: "12001"
         CODE_SIGN_ENTITLEMENTS: Sources/itsypad-ios.entitlements
         SWIFT_VERSION: "5.9"
         IPHONEOS_DEPLOYMENT_TARGET: "17.0"

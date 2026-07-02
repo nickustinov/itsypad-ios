@@ -6,6 +6,9 @@ struct TabData: Identifiable, Equatable {
     var content: String
     var language: String
     var fileURL: URL?
+    /// Security-scoped bookmark for fileURL – required to regain write access
+    /// to files imported from outside the sandbox after the picker's grant ends.
+    var fileBookmark: Data?
     var languageLocked: Bool
     var isDirty: Bool
     var cursorPosition: Int
@@ -22,6 +25,7 @@ struct TabData: Identifiable, Equatable {
         content: String = "",
         language: String = "plain",
         fileURL: URL? = nil,
+        fileBookmark: Data? = nil,
         languageLocked: Bool = false,
         isDirty: Bool = false,
         cursorPosition: Int = 0,
@@ -32,6 +36,7 @@ struct TabData: Identifiable, Equatable {
         self.content = content
         self.language = language
         self.fileURL = fileURL
+        self.fileBookmark = fileBookmark
         self.languageLocked = languageLocked
         self.isDirty = isDirty
         self.cursorPosition = cursorPosition
@@ -47,6 +52,7 @@ extension TabData: Codable {
         content = try c.decode(String.self, forKey: .content)
         language = try c.decode(String.self, forKey: .language)
         fileURL = try c.decodeIfPresent(URL.self, forKey: .fileURL)
+        fileBookmark = try c.decodeIfPresent(Data.self, forKey: .fileBookmark)
         languageLocked = try c.decode(Bool.self, forKey: .languageLocked)
         isDirty = try c.decodeIfPresent(Bool.self, forKey: .isDirty) ?? false
         cursorPosition = try c.decode(Int.self, forKey: .cursorPosition)
@@ -60,9 +66,10 @@ class TabStore: ObservableObject {
     @Published var tabs: [TabData] = []
     @Published var selectedTabID: UUID?
     @Published var lastICloudSync: Date?
+    @Published var fileSaveError: String?
 
     private var saveDebounceWork: DispatchWorkItem?
-    private var languageDetectWork: DispatchWorkItem?
+    private var languageDetectWork: [UUID: DispatchWorkItem] = [:]
     private let sessionURL: URL
 
     var selectedTab: TabData? {
@@ -80,16 +87,13 @@ class TabStore: ObservableObject {
         }
 
         restoreSession()
-        print("[TabStore] init: restored \(tabs.count) tabs, selectedTabID=\(selectedTabID?.uuidString ?? "nil")")
 
         if tabs.isEmpty {
             let isFirstLaunch = !FileManager.default.fileExists(atPath: self.sessionURL.path)
             if isFirstLaunch {
                 addWelcomeTab()
-                print("[TabStore] init: first launch, created welcome tab")
             } else {
                 addNewTab()
-                print("[TabStore] init: no tabs after restore, created new tab")
             }
         }
     }
@@ -135,6 +139,14 @@ class TabStore: ObservableObject {
         scheduleSave()
     }
 
+    func selectNeighborTab(delta: Int) {
+        guard let id = selectedTabID,
+              let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+        let newIndex = index + delta
+        guard tabs.indices.contains(newIndex) else { return }
+        selectedTabID = tabs[newIndex].id
+    }
+
     func closeTab(id: UUID) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
         let isScratch = tabs[index].fileURL == nil
@@ -168,7 +180,9 @@ class TabStore: ObservableObject {
         if tab.fileURL == nil {
             let firstLine = content.prefix(while: { $0 != "\n" && $0 != "\r" })
             let trimmed = firstLine.trimmingCharacters(in: .whitespacesAndNewlines)
-            let newName = trimmed.isEmpty ? "Untitled" : String(trimmed.prefix(30))
+            let newName = trimmed.isEmpty
+                ? String(localized: "tab.untitled", defaultValue: "Untitled")
+                : String(trimmed.prefix(30))
             tab.name = newName
         }
 
@@ -186,18 +200,32 @@ class TabStore: ObservableObject {
     }
 
     private func scheduleLanguageDetection(id: UUID, content: String, name: String?, fileURL: URL?) {
-        languageDetectWork?.cancel()
+        languageDetectWork[id]?.cancel()
         let work = DispatchWorkItem { [weak self] in
-            guard let self, let index = self.tabs.firstIndex(where: { $0.id == id }),
+            guard let self else { return }
+            self.languageDetectWork.removeValue(forKey: id)
+            guard let index = self.tabs.firstIndex(where: { $0.id == id }),
                   !self.tabs[index].languageLocked else { return }
             let result = LanguageDetector.shared.detect(text: content, name: name, fileURL: fileURL)
+            let newLang: String?
             if result.confidence > 0 {
-                self.tabs[index].language = result.lang
+                newLang = result.lang
             } else if self.tabs[index].language != "plain" && result.lang == "plain" {
-                self.tabs[index].language = "plain"
+                newLang = "plain"
+            } else {
+                newLang = nil
+            }
+            // Persist and sync the detected language – otherwise it is lost
+            // on relaunch and never reaches other devices until the next edit
+            if let newLang, self.tabs[index].language != newLang {
+                self.tabs[index].language = newLang
+                self.scheduleSave()
+                if self.tabs[index].fileURL == nil {
+                    CloudSyncEngine.shared.recordChanged(id)
+                }
             }
         }
-        languageDetectWork = work
+        languageDetectWork[id] = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: work)
     }
 
@@ -212,9 +240,17 @@ class TabStore: ObservableObject {
         scheduleSave()
     }
 
+    /// Kept outside the @Published tabs array – the caret moves on every
+    /// keystroke and mutating tabs would re-render all tab UI each time.
+    /// Merged into the persisted session by saveSession.
+    private var cursorPositions: [UUID: Int] = [:]
+
     func updateCursorPosition(id: UUID, position: Int) {
-        guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
-        tabs[index].cursorPosition = position
+        cursorPositions[id] = position
+    }
+
+    func cursorPosition(for id: UUID) -> Int {
+        cursorPositions[id] ?? tabs.first { $0.id == id }?.cursorPosition ?? 0
     }
 
     func renameTab(id: UUID, name: String) {
@@ -269,6 +305,9 @@ class TabStore: ObservableObject {
             content: content,
             language: lang,
             fileURL: url,
+            // Capture while the picker's access grant is still active –
+            // it's the only way to write to this file in later sessions
+            fileBookmark: try? url.bookmarkData(),
             languageLocked: true
         )
         tabs.append(tab)
@@ -276,20 +315,42 @@ class TabStore: ObservableObject {
         scheduleSave()
     }
 
+    /// Resolves the tab's bookmark into a URL we are allowed to write to.
+    /// Returns the URL and whether stopAccessingSecurityScopedResource is owed.
+    private func writableFileURL(for index: Int) -> (url: URL, scoped: Bool)? {
+        guard let fileURL = tabs[index].fileURL else { return nil }
+
+        if let bookmark = tabs[index].fileBookmark {
+            var stale = false
+            if let resolved = try? URL(resolvingBookmarkData: bookmark, bookmarkDataIsStale: &stale) {
+                let scoped = resolved.startAccessingSecurityScopedResource()
+                if stale {
+                    tabs[index].fileBookmark = try? resolved.bookmarkData()
+                }
+                return (resolved, scoped)
+            }
+        }
+        return (fileURL, fileURL.startAccessingSecurityScopedResource())
+    }
+
     func saveFile(id: UUID) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
 
-        guard let fileURL = tabs[index].fileURL else {
+        guard let target = writableFileURL(for: index) else {
             // No file URL – caller should trigger save-as picker
             return
         }
+        defer {
+            if target.scoped { target.url.stopAccessingSecurityScopedResource() }
+        }
 
         do {
-            try tabs[index].content.write(to: fileURL, atomically: true, encoding: .utf8)
+            try tabs[index].content.write(to: target.url, atomically: true, encoding: .utf8)
             tabs[index].isDirty = false
             scheduleSave()
         } catch {
             NSLog("Failed to save file: \(error)")
+            fileSaveError = error.localizedDescription
         }
     }
 
@@ -297,9 +358,15 @@ class TabStore: ObservableObject {
     func completeSaveAs(id: UUID, url: URL) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
 
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer {
+            if scoped { url.stopAccessingSecurityScopedResource() }
+        }
+
         do {
             try tabs[index].content.write(to: url, atomically: true, encoding: .utf8)
             tabs[index].fileURL = url
+            tabs[index].fileBookmark = try? url.bookmarkData()
             tabs[index].name = url.lastPathComponent
             tabs[index].isDirty = false
 
@@ -311,6 +378,7 @@ class TabStore: ObservableObject {
             scheduleSave()
         } catch {
             NSLog("Failed to save file: \(error)")
+            fileSaveError = error.localizedDescription
         }
     }
 
@@ -322,16 +390,8 @@ class TabStore: ObservableObject {
 
     // MARK: - Cloud sync
 
-    struct CloudMergeResult {
-        var newTabIDs: [UUID] = []
-        var updatedTabIDs: [UUID] = []
-        var removedTabIDs: [UUID] = []
-    }
-
-    static let cloudTabsMerged = Notification.Name("cloudTabsMerged")
-
     func applyCloudTab(_ data: CloudTabRecord) {
-        var result = CloudMergeResult()
+        var changed = false
 
         if let localIndex = tabs.firstIndex(where: { $0.id == data.id }) {
             // Only accept cloud version if it's newer than local
@@ -344,7 +404,7 @@ class TabStore: ObservableObject {
                 tabs[localIndex].language = data.language
                 tabs[localIndex].languageLocked = data.languageLocked
                 tabs[localIndex].lastModified = data.lastModified
-                result.updatedTabIDs.append(data.id)
+                changed = true
             }
         } else {
             let tab = TabData(
@@ -357,39 +417,31 @@ class TabStore: ObservableObject {
                 lastModified: data.lastModified
             )
             tabs.append(tab)
-            result.newTabIDs.append(data.id)
+            changed = true
         }
 
-        let changed = !result.newTabIDs.isEmpty || !result.updatedTabIDs.isEmpty
         lastICloudSync = Date()
-
         if changed {
-            NotificationCenter.default.post(
-                name: Self.cloudTabsMerged,
-                object: self,
-                userInfo: ["result": result]
-            )
             scheduleSave()
         }
     }
 
     func removeCloudTab(id: UUID) {
-        guard tabs.contains(where: { $0.id == id }) else { return }
+        guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+        tabs.remove(at: index)
 
-        var result = CloudMergeResult()
-        result.removedTabIDs.append(id)
-        tabs.removeAll { $0.id == id }
-
-        if tabs.isEmpty {
+        if selectedTabID == id {
+            if tabs.isEmpty {
+                addNewTab()
+            } else {
+                let newIndex = min(index, tabs.count - 1)
+                selectedTabID = tabs[newIndex].id
+            }
+        } else if tabs.isEmpty {
             addNewTab()
         }
 
         lastICloudSync = Date()
-        NotificationCenter.default.post(
-            name: Self.cloudTabsMerged,
-            object: self,
-            userInfo: ["result": result]
-        )
         scheduleSave()
     }
 
@@ -406,26 +458,35 @@ class TabStore: ObservableObject {
 
     func saveSession() {
         do {
-            let session = SessionData(tabs: tabs, selectedTabID: selectedTabID)
+            var snapshot = tabs
+            for index in snapshot.indices {
+                if let position = cursorPositions[snapshot[index].id] {
+                    snapshot[index].cursorPosition = position
+                }
+            }
+            let session = SessionData(tabs: snapshot, selectedTabID: selectedTabID)
             let data = try JSONEncoder().encode(session)
             try data.write(to: sessionURL, options: .atomic)
-            print("[TabStore] saveSession: wrote \(tabs.count) tabs (\(data.count) bytes)")
         } catch {
             NSLog("Failed to save session: \(error)")
         }
     }
 
     private func restoreSession() {
-        guard let data = try? Data(contentsOf: sessionURL),
-              let session = try? JSONDecoder().decode(SessionData.self, from: data)
-        else {
-            print("[TabStore] restoreSession: no session file or decode failed at \(sessionURL.path)")
+        guard let data = try? Data(contentsOf: sessionURL) else { return }
+
+        guard let session = try? JSONDecoder().decode(SessionData.self, from: data) else {
+            // The file exists but can't be decoded. Keep a copy before the
+            // next debounced save overwrites it with an empty session –
+            // without this, one bad read permanently destroys every tab.
+            let backupURL = sessionURL.appendingPathExtension("bak")
+            try? data.write(to: backupURL, options: .atomic)
+            NSLog("[TabStore] restoreSession: decode failed, backed up to \(backupURL.lastPathComponent)")
             return
         }
 
         tabs = session.tabs
         selectedTabID = session.selectedTabID ?? tabs.first?.id
-        print("[TabStore] restoreSession: loaded \(tabs.count) tabs, selected=\(selectedTabID?.uuidString.prefix(8) ?? "nil")")
 
         for index in tabs.indices where !tabs[index].languageLocked {
             let tab = tabs[index]
