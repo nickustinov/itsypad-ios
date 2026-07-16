@@ -90,6 +90,10 @@ final class EditorTextView: UITextView {
             name: UIResponder.keyboardWillChangeFrameNotification, object: nil
         )
         NotificationCenter.default.addObserver(
+            self, selector: #selector(appDidEnterBackground),
+            name: UIApplication.didEnterBackgroundNotification, object: nil
+        )
+        NotificationCenter.default.addObserver(
             self, selector: #selector(appDidBecomeActive),
             name: UIApplication.didBecomeActiveNotification, object: nil
         )
@@ -129,19 +133,28 @@ final class EditorTextView: UITextView {
 
     // MARK: - Foreground restore
 
-    /// True once the app has completed its first activation. The isEditable
-    /// cycle below is only needed after RETURNING from background – running it
-    /// during cold launch interrupts the initial keyboard presentation: UIKit
-    /// posts a keyboard-hide frame (zeroing the avoidance inset) and may skip
-    /// the re-show notification when the keyboard never visually moved,
-    /// leaving content stuck under the keyboard.
-    private static var hasCompletedInitialActivation = false
+    /// Armed when the app enters the background, consumed on the next
+    /// activation. The isEditable cycle below must run ONLY after returning
+    /// from the background: didBecomeActive also fires when a system alert
+    /// is dismissed – notably the cross-app paste permission prompt – and
+    /// cycling mid-editing-session breaks UITextInteraction's tap-to-place-
+    /// caret (taps stop moving the cursor right after pasting). It must also
+    /// not run during cold launch: the cycle interrupts the initial keyboard
+    /// presentation – UIKit posts a keyboard-hide frame (zeroing the
+    /// avoidance inset) and may skip the re-show notification when the
+    /// keyboard never visually moved, leaving content stuck under the
+    /// keyboard.
+    private(set) var needsInteractionReset = false
 
-    @objc private func appDidBecomeActive() {
-        guard Self.hasCompletedInitialActivation else {
-            Self.hasCompletedInitialActivation = true
-            return
-        }
+    /// Internal (not private) so tests can exercise the gating directly –
+    /// notification-driven tests race the host app's real lifecycle.
+    @objc func appDidEnterBackground() {
+        needsInteractionReset = true
+    }
+
+    @objc func appDidBecomeActive() {
+        guard needsInteractionReset else { return }
+        needsInteractionReset = false
         guard window != nil else { return }
         // Cycle isEditable to reset UITextInteraction gesture recognizers
         // that can get stuck after the app returns from background.

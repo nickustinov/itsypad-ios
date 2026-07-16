@@ -376,6 +376,34 @@ final class EditorCoordinatorTests: XCTestCase {
         XCTAssertEqual(tv.contentInset.bottom, 300)
     }
 
+    // MARK: - Interaction reset gating
+
+    func testActivationWithoutBackgroundingDoesNotResetInteractions() {
+        // didBecomeActive also fires when a system alert is dismissed (e.g.
+        // the cross-app paste permission prompt) – the reset must stay off
+        let tv = EditorTextView(frame: CGRect(x: 0, y: 0, width: 320, height: 480))
+        XCTAssertFalse(tv.needsInteractionReset)
+
+        tv.appDidBecomeActive()
+
+        XCTAssertFalse(tv.needsInteractionReset)
+    }
+
+    func testBackgroundingArmsInteractionResetAndActivationConsumesIt() {
+        let tv = EditorTextView(frame: CGRect(x: 0, y: 0, width: 320, height: 480))
+
+        tv.appDidEnterBackground()
+        XCTAssertTrue(tv.needsInteractionReset)
+
+        tv.appDidBecomeActive()
+        XCTAssertFalse(tv.needsInteractionReset)
+
+        // A later activation (e.g. after a paste permission alert) must not
+        // run the reset again without a new background transition
+        tv.appDidBecomeActive()
+        XCTAssertFalse(tv.needsInteractionReset)
+    }
+
     // MARK: - UTF-16 correctness with emoji
 
     func testToggleChecklistWithEmojiKeepsCursorAtUTF16Position() {

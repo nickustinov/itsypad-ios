@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.1
+
+- Fix tapping to position the cursor always landing on the top line (text container height was zero, collapsing tap hit-testing)
+- Fix editing session being disrupted after dismissing system alerts such as the paste permission prompt
+
 ## 1.2.0
 
 - Fix cursor jumping to the end of the text when iCloud sync applies changes from another device

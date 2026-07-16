@@ -77,7 +77,11 @@ struct EditorView: UIViewRepresentable {
             let textStorage = NSTextStorage()
             let layoutManager = NSLayoutManager()
             textStorage.addLayoutManager(layoutManager)
-            let textContainer = NSTextContainer(size: .zero)
+            // Height must be unlimited: layout treats 0 as "no limit", but
+            // UITextView's tap hit-testing (closestPosition) clamps the touch
+            // point to the container size – with height 0 every tap resolves
+            // to the first line. Width is managed via widthTracksTextView.
+            let textContainer = NSTextContainer(size: CGSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
             textContainer.widthTracksTextView = true
             layoutManager.addTextContainer(textContainer)
             textView = EditorTextView(frame: .zero, textContainer: textContainer)
